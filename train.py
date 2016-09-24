@@ -18,9 +18,22 @@ import manage_data
 import export_to_octave
 
 import time
+import sys
+import pyaudio
+import scipy.fftpack
+import numpy.fft
+
+p = pyaudio.PyAudio()
 
 def train(parameters, model, trainingData, testingData, start, minutes, name="", loss_improved_limit=50):
     print('Launching training.')
+
+#for chunk in np.array_split(wav, 100):
+
+#stream.stop_stream()
+#stream.close()
+
+#p.terminate()
 #    accuracy_summary = tf.scalar_summary("cost", model["cost"])
 #    merged = tf.merge_all_summaries()
     init = tf.initialize_all_variables()
@@ -49,6 +62,7 @@ def train(parameters, model, trainingData, testingData, start, minutes, name="",
         last_losses = []
         last_loss = None
         best_loss = 1e20
+        sample_length = parameters['sample_length']
         #while step / parameters['display_step'] <= 300:
         while now - start_time < 60 * minutes and iters_since_loss_improved < loss_improved_limit:
             if last_loss:
@@ -58,8 +72,7 @@ def train(parameters, model, trainingData, testingData, start, minutes, name="",
             #export_to_octave.save('training_data_d.mat', 'trainingData', trainingData)
         
             # parameters['learning_rate'] = parameters['learning_rate'] * parameters['decay']
-            batch_xs = manage_data.getNextTrainingBatchSequences(trainingData,
-                parameters['batch_size'], parameters['half_sample_length'])
+            batch_xs = manage_data.getNextTrainingBatchSequence(trainingData, sample_length)
             
             # Fit training using batch data
 
@@ -72,20 +85,18 @@ def train(parameters, model, trainingData, testingData, start, minutes, name="",
                 # For debugging, exporting a couple of arrays to Octave.
                 #export_to_octave.save('batch_xs.mat', 'batch_xs', batch_xs)
                 
-                batch_xs = manage_data.getNextTrainingBatchSequences(trainingData,
-                    parameters['batch_size'], parameters['half_sample_length'])
+                #batch_xs = manage_data.getNextTrainingBatchSequences(trainingData,
+                #    parameters['batch_size'], parameters['half_sample_length'])
                 # Calculate batch error as mean distance
-                [error] = sess.run([tf.stop_gradient(model['cost'])], feed_dict = {
+                [error, prediction] = sess.run([tf.stop_gradient(model['cost']), tf.stop_gradient(model['output'])], feed_dict = {
                     model['x']: batch_xs
                 })
                 trainErrorTrend.append(error)
 
                 # Calculate batch loss
-                print "Iter " + str(iter * parameters['batch_size']) + ", Minibatch Loss= " + \
-                    "{:.6f}".format(error)
+                print "Iter {}".format(iter) + ", Loss={}".format(error)
 
-                test_x = manage_data.getNextTrainingBatchSequences(testingData,
-                    parameters['batch_size'], parameters['half_sample_length'])
+                test_x = manage_data.getNextTrainingBatchSequence(testingData, sample_length)
 
                 [testError] = sess.run([tf.stop_gradient(model['cost'])],
                     feed_dict={model['x']: test_x})
@@ -107,12 +118,27 @@ def train(parameters, model, trainingData, testingData, start, minutes, name="",
                 export_to_octave.save('train_error_' + name + '.mat', 'train_error', trainErrorTrend)
                 export_to_octave.save('test_error_' + name + '.mat', 'test_error', testErrorTrend)
 
+                print "prediction: ", prediction
+                #wav = np.int16(prediction[0] * (2.**15))
+                #stream = p.open(format=p.get_format_from_width(2),
+                #    channels=1,
+                #    rate=44100,
+                #    output=True)
+                #stream.write(wav)
+                #stream.stop_stream()
+                #stream.close()
+                ## Random activations from 0.0-1.0.                
+                ##random_act = np.random.uniform(size=64)
+                # Random one hot.
+                sys.stdout.flush()
             iter += 1
             step += 1
             now = time.time()
         saver.save(sess, 'sound-model-' + name, global_step=iter)
         print "Optimization Finished!"
-        
+        sys.stdout.flush()
+
+        p.terminate()
         # Returning the last loss value for hyper parameter search
         return last_loss
     

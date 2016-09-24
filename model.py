@@ -15,94 +15,175 @@ import random
 import json
 import itertools
 
-# The model is a deep self-associative bottleneck network with RELU activations,
-# with input and output being the pure waveform. The loss is calculated in a
-# convolutional fashion combining two adjanced outputs with triangular mixing.
-# Additionally the loss includes a regularization term for the difference of the two
-# bottleneck layer activations.
+def mu_law(x, mu):
+    ml = tf.sign(x) * tf.log(mu * tf.abs(x) + 1.0) / tf.log(mu + 1.0)
+    # Scaling between -128 and 128 integers.
+    return tf.cast((ml + 1.0) / 2.0 * mu + 0.5, tf.int32)
 
-def loss(prediction, y):
-    return tf.reduce_mean(tf.nn.l2_loss(tf.sub(prediction, y)))
+def de_mu_law(y, mu):
+    scaled = 2 * (y / mu) - 1
+    magnitude = (1 / mu) * ((1 + mu) ** abs(scaled) - 1)
+    return tf.sign(scaled) * magnitude
 
-def generative_module(x, layers, model):
-    next_layer_input = x
-    layer_activations = []
-    min_layer_size = 99999
-    bottleneck = None
-    min_layer_index = 0
-    for (i, layer) in enumerate(layers):
-        if (layer < min_layer_size):
-            min_layer_size = layer
-            min_layer_index = i
-    # Only processing the layers after the bottleneck here.
-    for i in range(min_layer_index + 1, len(layers)):
-        w = model['weights'][i]
-        b = model['biases'][i]
-        next_layer_input = tf.nn.relu(tf.add(tf.matmul(next_layer_input, w), b))
-    return next_layer_input
+# value shape is [width, quantization_channels]
+# filters shape is [filter_width, quantization_channels, dilation_channels]
+# In some implementations dilation_channels is 256.
+def causal_atrous_conv1d(value, filters, rate, padding):
+    # Using height in 2-D as the 1-D.
+    value_2d = tf.expand_dims(tf.expand_dims(value, 0), 2)
+    filters_2d = tf.expand_dims(filters, 1)
+    # Note that for filters using 'SAME' padding, padding zeros are added to the end of the input.
+    # This means that for causal convolutions, we must shift the output right.
+    # add zeros to the start and remove the future values from the end.
+    
+    atr_conv_1d = tf.squeeze(tf.nn.atrous_conv2d(value_2d, filters_2d, rate, padding), [0, 2])
+    # atr_conv_1d shape is [width, dilation_channels]
+    
+    width = tf.shape(value)[0]
+    filter_shape = tf.shape(filters)
+    filter_width = filter_shape[0]
+    filter_width_up = filter_width + (filter_width - 1) * (rate - 1)
+    pad_width = filter_width_up - 1
+    pad_left = pad_width // 2
+    pad_right = pad_width - pad_left
+    # We want to shift the result so that acausal values are removed.
+    # Any value in the output that makes use of right padding values are acausal.
+    # So, we remove pad_right elements from the end, and add as many zeros to the beginning.
+    dilation_channels = tf.shape(atr_conv_1d)[1]
+    causal = tf.pad(tf.slice(atr_conv_1d, [0, 0], [width - pad_right, dilation_channels]),
+                    [[pad_right, 0], [0, 0]])
+    return causal
 
-def module(x, layers, model):
-    next_layer_input = x
-    layer_activations = []
-    min_layer_size = 99999
-    bottleneck = None
-    for (layer, w, b) in zip(layers, model['weights'], model['biases']):
-        next_layer_input = tf.nn.relu(tf.add(tf.matmul(next_layer_input, w), b))
-        layer_activations.append(next_layer_input)
-        # The bottleneck state is important.
-        if layer < min_layer_size:
-            min_layer_size = Layer
-            bottleneck = next_layer_input
-    return (next_layer_input, bottleneck)
+# Returns a tuple of output to the next layer and skip output.
+# The shape of x is [width, dense_channels]
+# w1, w2 shapes are [filter_width, dense_channels, dilation_channels]
+# cw shape is [filter_width, dilation_channels, intermediate_output_channels]
+# In some implementations dilation_channels and intermediate_output_channels are both 256.
+def gated_unit(x, dilation, parameters, layer_index):
+    tf.histogram_summary('{}_x'.format(layer_index), x)
+    
+    filter_width = parameters['filter_width']
+    dense_channels = parameters['dense_channels']
+    dilation_channels = parameters['dilation_channels']
+    quantization_channels = parameters['quantization_channels']
+
+    w1 = tf.Variable(tf.random_normal([filter_width, dense_channels, dilation_channels], stddev=0.05),
+            dtype=tf.float32, name='w1')
+    w2 = tf.Variable(tf.random_normal([filter_width, dense_channels, dilation_channels], stddev=0.05),
+            dtype=tf.float32, name='w2')
+    cw = tf.Variable(tf.random_normal([filter_width, dilation_channels, dense_channels], stddev=0.05),
+            dtype=tf.float32, name='w2')
+
+    tf.histogram_summary('{}_w1'.format(layer_index), w1)
+    tf.histogram_summary('{}_w2'.format(layer_index), w2)
+    tf.histogram_summary('{}_cw'.format(layer_index), cw)
+    
+    # x shape is [width, quantization_channels]
+    with tf.name_scope('causal_atrous_convolution'):
+        dilated1 = causal_atrous_conv1d(x, w1, dilation, 'SAME')
+        dilated2 = causal_atrous_conv1d(x, w2, dilation, 'SAME')
+    with tf.name_scope('gated_unit'):
+        z = tf.mul(tf.tanh(dilated1), tf.sigmoid(dilated2))
+    # dilated1, dilated2, z shapes are [width, dilation_channels]
+    skip = tf.squeeze(tf.nn.conv1d(tf.expand_dims(z, 0), cw, 1, 'SAME'), [0])
+    tf.histogram_summary('{}_skip'.format(layer_index), skip)
+    # [1,7,256] vs. [1,3,256]
+    output = skip + x
+    tf.histogram_summary('{}_output'.format(layer_index), output)
+    # combined and output shapes are [width, intermediate_output_channels]
+    return (output, skip)
+
+# Returns a tuple of (output, non-softmaxed-logits output)
+# The non-softmaxed output is used for the loss calculation.
+# quantization_channels = 256
+# The shape of x is [width, quantization_channels]
+# The shape of output is [width, 256]
+# w1, w2 shapes are [filter_width, quantization_channels, dilation_channels]
+# cw shape is [filter_width, dilation_channels, intermediate_output_channels]
+# co1 shape is [filter_width, intermediate_output_channels, dense_channels]
+# co2 shape is [filter_width, dense_channels, 256]
+# Dilations is an array of [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1, 2, ..., 512]
+def layers(x, parameters):
+    dilations = parameters['dilations']
+    filter_width = parameters['filter_width']
+    quantization_channels = parameters['quantization_channels']
+    dense_channels = parameters['dense_channels']
+    intermediate_output_channels = parameters['intermediate_output_channels']
+    
+    width = tf.shape(x)[0]
+
+    co_dense = tf.Variable(tf.random_normal([filter_width, quantization_channels, dense_channels], stddev=0.05),
+            dtype=tf.float32, name='dense_w')
+    
+    next_input = tf.squeeze(tf.nn.conv1d(tf.expand_dims(x, 0), co_dense, 1, 'SAME'), [0])
+    skip_connections = []
+    for (i, dilation) in enumerate(dilations):
+        with tf.name_scope('layer_{}'.format(i)):
+            print "Creating layer {}".format(i)
+            (output, skip) = gated_unit(next_input, dilation, parameters, i)
+            # output and skip shapes are [width, quantization_channels]
+            next_input = output
+            skip_connections.append(skip)
+    sum_of_skip_connections = reduce(lambda l, r: l + r, skip_connections)
+    # sum_of_skip_connections shape is [width, quantization_channels]
+    relu1 = tf.nn.relu(sum_of_skip_connections)
+    
+    co1 = tf.Variable(tf.random_normal([filter_width, dense_channels, intermediate_output_channels], stddev=0.05),
+            dtype=tf.float32, name='co1')
+    co2 = tf.Variable(tf.random_normal([filter_width, intermediate_output_channels, 256], stddev=0.05),
+            dtype=tf.float32, name='co2')
+    
+    relu2 = tf.nn.relu(tf.squeeze(tf.nn.conv1d(tf.expand_dims(relu1, 0), co1, 1, 'SAME'), [0]))
+    raw_output = tf.squeeze(tf.nn.conv1d(tf.expand_dims(relu2, 0), co2, 1, 'SAME'), [0])
+    # raw_output shape is [width, 256]
+    output = tf.nn.softmax(raw_output)
+    return (output, raw_output)
+
+def sample(raw_output_logits):
+    probabilities = tf.nn.softmax(raw_output_logits)
+    return 
 
 def create(parameters):
-    print('Creating the neural network model.')
-    tf.reset_default_graph()
-    # tf Graph input
-    # The input consists of two samples, overlapping with half a sample width.
-    x = tf.placeholder(tf.float32, shape=(None, parameters['half_sample_length'] * 3), name='training_input')
-    # The expected output is the one half-sample at the overlap.
-    y = tf.slice(x, [0, parameters['half_sample_length']], [parameters['batch_size'], parameters['half_sample_length']], name='y')
-    # The generative input is forcing the activation of the bottleneck layer.
-    generative_input = tf.placeholder(tf.float32, shape=(None, parameters['generative_input_size']), name='generative_input')
-
-    weights = [parameters['half_sample_length'] * 2] + parameters['layers']
-    layers = parameters['layers'] + [parameters['half_sample_length'] * 2]
-    model = {
-        'weights': [tf.Variable(tf.random_normal(
-            [weight_length, layer_size]), name='weights_' + str(i)) for (i, (weight_length, layer_size)) in enumerate(zip(weights, layers))],
-        'biases': [tf.Variable(tf.random_normal(
-            [layer_size]), name='biases_' + str(i)) for (i, layer_size) in enumerate(layers)],
-        'x': x,
-        'y': y,
-        'generative_input': generative_input
-    }
-
-    # Define loss and optimizer
-    batch_size = parameters['batch_size']
-
-    # Collecting the predictions for both sides.
-    (left_prediction, left_bottleneck) = module(tf.slice(x, [0, 0], [parameters['batch_size'], parameters['half_sample_length'] * 2]), layers, model)
-    left_half = tf.slice(left_prediction, [0, parameters['half_sample_length']], [parameters['batch_size'], parameters['half_sample_length']])
-
-    (right_prediction, right_bottleneck) = module(tf.slice(x, [0, parameters['half_sample_length']], [parameters['batch_size'], parameters['half_sample_length'] * 2]), layers, model)
-    right_half = tf.slice(right_prediction, [0, 0], [parameters['batch_size'], parameters['half_sample_length']])
-
-    model['generative_output'] = generative_module(generative_input, layers, model)
-    # half_sample_length sized linear slope from 0.0 to 1.0
-    right_slope = np.asfarray(range(0, parameters['half_sample_length']), dtype=np.float32) / (parameters['half_sample_length'] - 1)
-    left_slope = 1 - right_slope
-    prediction = tf.mul(left_slope, left_half) + tf.mul(right_slope, right_half, name='prediction')
-    cost = loss(prediction, y) + tf.nn.l2_loss(tf.sub(left_bottleneck, right_bottleneck))
-
+    quantization_channels = parameters['quantization_channels']
+    sample_length = parameters['sample_length']
+    input = tf.placeholder(tf.float32, shape=(sample_length), name='input')
+    y = input
+    x = tf.pad(tf.slice(input, [0], [tf.shape(input)[0] - 1]), [[1, 0]])
+    # x is shifted right by one and padded by zero.
+    mu_lawd = mu_law(x, float(quantization_channels - 1))
+    shifted_mu_law_x = tf.one_hot(mu_lawd, quantization_channels)
+    
+    classes_y = mu_law(y, quantization_channels - 1)
+    (output, raw_output) = layers(shifted_mu_law_x, parameters)
+    cost = tf.nn.sparse_softmax_cross_entropy_with_logits(raw_output, classes_y, name='cost')
+    
     tvars = tf.trainable_variables()
-    gradients = map(tf.to_float, tf.gradients(cost, tvars))
+    gradients = tf.gradients(cost, tvars)
+    # grads, _ = tf.clip_by_global_norm(gradients, parameters['clip_gradients'])
     optimizer = tf.train.AdamOptimizer(learning_rate = parameters['learning_rate'])
 
     train_op = optimizer.apply_gradients(zip(gradients, tvars))
+    tf.add_check_numerics_ops()
+
+    model = {
+        'output': output,
+        'optimizer': train_op,
+        'x': input,
+        'cost': cost
+    }
+    return model
+
+def create_generative_model(parameters):
+    quantization_channels = parameters['quantization_channels']
+    input = tf.placeholder(tf.float32, shape=(None), name='input')
+    mu_law_input = tf.one_hot(mu_law(input, float(quantization_channels - 1)), quantization_channels)
     
-    model['prediction'] = prediction
-    model['cost'] = cost
-    model['optimizer'] = train_op
-    
+    (full_generated_output, _) = layers(mu_law_input, parameters)
+    # Generated output is only the last predicted distribution
+    generated_output = tf.slice(full_generated_output, [tf.shape(full_generated_output)[0] - 1, 0], [1, -1])
+
+    model = {
+        'generated_output': generated_output,
+        'x': input
+    }
     return model

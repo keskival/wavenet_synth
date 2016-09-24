@@ -1,9 +1,14 @@
 parameters = {
-    'learning_rate': 0.0068,
+    'learning_rate': 0.01,
     'display_step': 5,
-    'layers': [256, 128, 64, 128, 256],
-    'generative_input_size': 64,
-    'keep_prob': 0.5,
-    'half_sample_length': 44100,
-    'batch_size': 50
+    'dilations': sum(([1, 2, 4, 8, 16, 32, 64, 128, 256, 512] for i in range(1)), []),
+    # The receptive field size for a dilation set is the number of 1-512 sequences times 1023 + 1.
+    # For one second receptive field approximately 44 sequences are needed.
+    # Convolution sizes.
+    'dense_channels': 16,
+    'intermediate_output_channels': 16,
+    'dilation_channels': 8,
+    'quantization_channels': 256,
+    'filter_width': 2,
+    'sample_length': (1023 * 1 + 1) * 2
 }

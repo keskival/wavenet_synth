@@ -6,6 +6,8 @@ import pylab
 
 import tensorflow as tf
 import numpy as np
+import scipy.fftpack
+import numpy.fft
 
 import random
 import json
@@ -15,13 +17,11 @@ import itertools
 def getNextTrainingBatch(data, n_steps):
     # A random displacement to take the batch from.
     data_length = data.shape[0]
-    disp = random.randint(0, len(data[:]) - n_steps - 1)
+    disp = random.randint(0, len(data[:]) - n_steps - 1) # 200000 + random.randint(0, 3) * 100000 #
     return data[disp:disp + n_steps]
 
-def getNextTrainingBatchSequences(data, batch_size, half_sample):
+def getNextTrainingBatchSequence(data, sample_size):
     result = []
-    for batch in range(batch_size):
-        sequence = getNextTrainingBatch(data, half_sample * 3)
-        result.append(sequence)
-    x = np.asarray(result)
+    sequence = getNextTrainingBatch(data, sample_size)
+    x = np.asarray(sequence)
     return x

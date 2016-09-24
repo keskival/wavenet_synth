@@ -29,16 +29,17 @@ def de_mu_law(y, mu):
 # filters shape is [filter_width, quantization_channels, dilation_channels]
 # In some implementations dilation_channels is 256.
 def causal_atrous_conv1d(value, filters, rate, padding):
-    # Using height in 2-D as the 1-D.
+    # Using height in 2-D as the 1-D. Adding the batch dimension also.
     value_2d = tf.expand_dims(tf.expand_dims(value, 0), 2)
     filters_2d = tf.expand_dims(filters, 1)
     # Note that for filters using 'SAME' padding, padding zeros are added to the end of the input.
     # This means that for causal convolutions, we must shift the output right.
     # add zeros to the start and remove the future values from the end.
     
+    # Squeezing out the width and the batch dimensions.
     atr_conv_1d = tf.squeeze(tf.nn.atrous_conv2d(value_2d, filters_2d, rate, padding), [0, 2])
     # atr_conv_1d shape is [width, dilation_channels]
-    
+
     width = tf.shape(value)[0]
     filter_shape = tf.shape(filters)
     filter_width = filter_shape[0]
@@ -71,8 +72,8 @@ def gated_unit(x, dilation, parameters, layer_index):
             dtype=tf.float32, name='w1')
     w2 = tf.Variable(tf.random_normal([filter_width, dense_channels, dilation_channels], stddev=0.05),
             dtype=tf.float32, name='w2')
-    cw = tf.Variable(tf.random_normal([filter_width, dilation_channels, dense_channels], stddev=0.05),
-            dtype=tf.float32, name='w2')
+    cw = tf.Variable(tf.random_normal([1, dilation_channels, dense_channels], stddev=0.05),
+            dtype=tf.float32, name='cw')
 
     tf.histogram_summary('{}_w1'.format(layer_index), w1)
     tf.histogram_summary('{}_w2'.format(layer_index), w2)
@@ -87,7 +88,6 @@ def gated_unit(x, dilation, parameters, layer_index):
     # dilated1, dilated2, z shapes are [width, dilation_channels]
     skip = tf.squeeze(tf.nn.conv1d(tf.expand_dims(z, 0), cw, 1, 'SAME'), [0])
     tf.histogram_summary('{}_skip'.format(layer_index), skip)
-    # [1,7,256] vs. [1,3,256]
     output = skip + x
     tf.histogram_summary('{}_output'.format(layer_index), output)
     # combined and output shapes are [width, intermediate_output_channels]
@@ -105,14 +105,13 @@ def gated_unit(x, dilation, parameters, layer_index):
 # Dilations is an array of [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1, 2, ..., 512]
 def layers(x, parameters):
     dilations = parameters['dilations']
-    filter_width = parameters['filter_width']
     quantization_channels = parameters['quantization_channels']
     dense_channels = parameters['dense_channels']
     intermediate_output_channels = parameters['intermediate_output_channels']
     
     width = tf.shape(x)[0]
 
-    co_dense = tf.Variable(tf.random_normal([filter_width, quantization_channels, dense_channels], stddev=0.05),
+    co_dense = tf.Variable(tf.random_normal([1, quantization_channels, dense_channels], stddev=0.05),
             dtype=tf.float32, name='dense_w')
     
     next_input = tf.squeeze(tf.nn.conv1d(tf.expand_dims(x, 0), co_dense, 1, 'SAME'), [0])
@@ -128,9 +127,9 @@ def layers(x, parameters):
     # sum_of_skip_connections shape is [width, quantization_channels]
     relu1 = tf.nn.relu(sum_of_skip_connections)
     
-    co1 = tf.Variable(tf.random_normal([filter_width, dense_channels, intermediate_output_channels], stddev=0.05),
+    co1 = tf.Variable(tf.random_normal([1, dense_channels, intermediate_output_channels], stddev=0.05),
             dtype=tf.float32, name='co1')
-    co2 = tf.Variable(tf.random_normal([filter_width, intermediate_output_channels, 256], stddev=0.05),
+    co2 = tf.Variable(tf.random_normal([1, intermediate_output_channels, 256], stddev=0.05),
             dtype=tf.float32, name='co2')
     
     relu2 = tf.nn.relu(tf.squeeze(tf.nn.conv1d(tf.expand_dims(relu1, 0), co1, 1, 'SAME'), [0]))

@@ -20,11 +20,6 @@ def mu_law(x, mu):
     # Scaling between -128 and 128 integers.
     return tf.cast((ml + 1.0) / 2.0 * mu + 0.5, tf.int32)
 
-def de_mu_law(y, mu):
-    scaled = 2 * (y / mu) - 1
-    magnitude = (1 / mu) * ((1 + mu) ** abs(scaled) - 1)
-    return tf.sign(scaled) * magnitude
-
 # value shape is [width, quantization_channels]
 # filters shape is [filter_width, quantization_channels, dilation_channels]
 # In some implementations dilation_channels is 256.
@@ -138,10 +133,6 @@ def layers(x, parameters):
     output = tf.nn.softmax(raw_output)
     return (output, raw_output)
 
-def sample(raw_output_logits):
-    probabilities = tf.nn.softmax(raw_output_logits)
-    return 
-
 def create(parameters):
     quantization_channels = parameters['quantization_channels']
     sample_length = parameters['sample_length']
@@ -174,12 +165,12 @@ def create(parameters):
 
 def create_generative_model(parameters):
     quantization_channels = parameters['quantization_channels']
-    input = tf.placeholder(tf.float32, shape=(None), name='input')
+    input = tf.placeholder(tf.float32, name='input')
     mu_law_input = tf.one_hot(mu_law(input, float(quantization_channels - 1)), quantization_channels)
     
     (full_generated_output, _) = layers(mu_law_input, parameters)
     # Generated output is only the last predicted distribution
-    generated_output = tf.slice(full_generated_output, [tf.shape(full_generated_output)[0] - 1, 0], [1, -1])
+    generated_output = tf.squeeze(tf.slice(full_generated_output, [tf.shape(full_generated_output)[0] - 1, 0], [1, -1]), [0])
 
     model = {
         'generated_output': generated_output,

@@ -27,8 +27,8 @@ def de_mu_law(y, mu):
 parameters = params.parameters
 print parameters
 
-signal = np.append(np.zeros(parameters['sample_length']), random.randrange(-1,1))
-
+signal = np.asarray([random.uniform(-1,1) for i in range(parameters['sample_length'])])
+output_signal = np.asarray([])
 p = pyaudio.PyAudio()
 
 generative_model = model.create_generative_model(parameters)
@@ -51,9 +51,10 @@ with tf.Session(config=config) as sess:
         image.append(probabilities)
         next_val = np.random.choice(np.arange(parameters['quantization_channels']), p=probabilities)
         value = de_mu_law(next_val, float(parameters['quantization_channels'] - 1))
-        signal = np.append(signal, value)
+        signal = np.append(signal, value)[1:]
+        output_signal = np.append(output_signal, value)
         export_to_octave.save('image.mat', 'i', image)
-        wav = np.asarray(map(int, signal * (2.**15)), dtype=np.int16)
+        wav = np.asarray(map(int, output_signal * (2.**15)), dtype=np.int16)
         export_to_octave.save('sound.mat', 's', wav)
     stream = p.open(format=p.get_format_from_width(2),
                 channels=1,

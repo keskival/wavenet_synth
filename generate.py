@@ -27,7 +27,10 @@ def de_mu_law(y, mu):
 parameters = params.parameters
 print parameters
 
-signal = np.asarray([random.uniform(-1,1) for i in range(parameters['sample_length'])])
+# 440 Hz
+t = np.asarray(range(parameters['sample_length'])) / 44100.0 * 2.0 * np.pi * 440
+
+signal = np.sin(t)
 output_signal = np.asarray([])
 p = pyaudio.PyAudio()
 

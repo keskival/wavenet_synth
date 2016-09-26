@@ -14,6 +14,7 @@ import numpy as np
 import random
 import json
 import itertools
+import sys
 
 def mu_law(x, mu):
     ml = tf.sign(x) * tf.log(mu * tf.abs(x) + 1.0) / tf.log(mu + 1.0)
@@ -118,9 +119,22 @@ def layers(x, parameters):
             # output and skip shapes are [width, dense_channels]
             next_input = output
             skip_connections.append(skip)
-    sum_of_skip_connections = reduce(lambda l, r: l + r, skip_connections)
-    # sum_of_skip_connections shape is [width, dense_channels]
-    relu1 = tf.nn.relu(sum_of_skip_connections)
+            sys.stdout.flush()
+    # Weighting the skip connections, being sad about not having a generalized matrix multiplication broadcast for tensors.
+    # A row vector of weights, one for each dilation
+    w_skip = tf.expand_dims(tf.Variable(tf.random_normal([len(dilations)], stddev=0.05),
+            dtype=tf.float32, name='w_skip'), 0)
+    
+    skips_tensor = tf.pack(skip_connections, 0)
+    # Each channel is dilations x width
+    unpacked_list_of_channels = tf.unpack(skips_tensor, axis=2)
+    channel_skips = []
+    for channel in unpacked_list_of_channels:
+        channel_skips.append(tf.matmul(w_skip, channel))
+        # The shapes of these are (1, width)
+    weighted_sum_of_skip_connections = tf.squeeze(tf.pack(channel_skips, axis=2), [0])
+    # weighted_sum_of_skip_connections shape is [width, dense_channels]
+    relu1 = tf.nn.relu(weighted_sum_of_skip_connections)
     
     co1 = tf.Variable(tf.random_normal([1, dense_channels, intermediate_output_channels], stddev=0.05),
             dtype=tf.float32, name='co1')

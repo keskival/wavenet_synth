@@ -85,7 +85,7 @@ def gated_unit(x, dilation, parameters, layer_index):
     tf.histogram_summary('{}_skip'.format(layer_index), skip)
     output = skip + x
     tf.histogram_summary('{}_output'.format(layer_index), output)
-    # combined and output shapes are [width, intermediate_output_channels]
+    # combined and output shapes are [width, dense_channels]
     return (output, skip)
 
 # Returns a tuple of (output, non-softmaxed-logits output)
@@ -115,11 +115,11 @@ def layers(x, parameters):
         with tf.name_scope('layer_{}'.format(i)):
             print "Creating layer {}".format(i)
             (output, skip) = gated_unit(next_input, dilation, parameters, i)
-            # output and skip shapes are [width, quantization_channels]
+            # output and skip shapes are [width, dense_channels]
             next_input = output
             skip_connections.append(skip)
     sum_of_skip_connections = reduce(lambda l, r: l + r, skip_connections)
-    # sum_of_skip_connections shape is [width, quantization_channels]
+    # sum_of_skip_connections shape is [width, dense_channels]
     relu1 = tf.nn.relu(sum_of_skip_connections)
     
     co1 = tf.Variable(tf.random_normal([1, dense_channels, intermediate_output_channels], stddev=0.05),

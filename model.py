@@ -54,8 +54,7 @@ def causal_atrous_conv1d(value, filters, rate, padding):
 # Returns a tuple of output to the next layer and skip output.
 # The shape of x is [width, dense_channels]
 # w1, w2 shapes are [filter_width, dense_channels, dilation_channels]
-# cw shape is [filter_width, dilation_channels, intermediate_output_channels]
-# In some implementations dilation_channels and intermediate_output_channels are both 256.
+# cw shape is [filter_width, dilation_channels, dense_channels]
 def gated_unit(x, dilation, parameters, layer_index):
     tf.histogram_summary('{}_x'.format(layer_index), x)
     
@@ -95,15 +94,14 @@ def gated_unit(x, dilation, parameters, layer_index):
 # The shape of x is [width, quantization_channels]
 # The shape of output is [width, 256]
 # w1, w2 shapes are [filter_width, quantization_channels, dilation_channels]
-# cw shape is [filter_width, dilation_channels, intermediate_output_channels]
-# co1 shape is [filter_width, intermediate_output_channels, dense_channels]
+# cw shape is [filter_width, dilation_channels, dense_channels]
+# co1 shape is [1, filter_width, dilations, 1]
 # co2 shape is [filter_width, dense_channels, 256]
 # Dilations is an array of [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1, 2, ..., 512]
 def layers(x, parameters):
     dilations = parameters['dilations']
     quantization_channels = parameters['quantization_channels']
     dense_channels = parameters['dense_channels']
-    intermediate_output_channels = parameters['intermediate_output_channels']
     
     width = tf.shape(x)[0]
 

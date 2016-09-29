@@ -44,7 +44,7 @@ config = tf.ConfigProto(gpu_options=gpu_options)
 image = []
 
 with tf.Session(config=config) as sess:
-    saver.restore(sess, 'sound-model-best-')
+    saver.restore(sess, 'sound-model-best')
     # Creating a 10 second sample
     for i in range(44100 * 10):
         print i

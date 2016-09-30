@@ -18,6 +18,14 @@ import sys
 
 import ops
 
+def xavier_halfrange(n_in):
+    ''' Returns the variance to use with Xavier initialization for sigmoid/tanh outputs '''
+    return math.sqrt(12.0 * (1.0 / n_in)) / 2.0
+
+def xavier_halfrange_rect(n_in):
+    ''' Returns the variance to use with Xavier initialization for rectified outputs '''
+    return math.sqrt(12.0 * (2.0 / n_in)) / 2.0
+
 def mu_law(x, mu):
     ml = tf.sign(x) * tf.log(mu * tf.abs(x) + 1.0) / tf.log(mu + 1.0)
     # Scaling between -128 and 128 integers.
@@ -72,11 +80,11 @@ def gated_unit(x, dilation, parameters, layer_index):
     dilation_channels = parameters['dilation_channels']
     quantization_channels = parameters['quantization_channels']
 
-    w1 = tf.Variable(tf.random_normal([filter_width, dense_channels, dilation_channels], stddev=0.05),
+    w1 = tf.Variable(tf.random_uniform([filter_width, dense_channels, dilation_channels], -xavier_halfrange(dense_channels), xavier_halfrange(dense_channels)),
             dtype=tf.float32, name='w1')
-    w2 = tf.Variable(tf.random_normal([filter_width, dense_channels, dilation_channels], stddev=0.05),
+    w2 = tf.Variable(tf.random_uniform([filter_width, dense_channels, dilation_channels], -xavier_halfrange(dense_channels), xavier_halfrange(dense_channels)),
             dtype=tf.float32, name='w2')
-    cw = tf.Variable(tf.random_normal([1, dilation_channels, dense_channels], mean=1.0, stddev=0.05),
+    cw = tf.Variable(tf.random_uniform([1, dilation_channels, dense_channels], -xavier_halfrange_rect(dilation_channels), xavier_halfrange_rect(dilation_channels)),
             dtype=tf.float32, name='cw')
 
     tf.histogram_summary('{}_w1'.format(layer_index), w1)
@@ -107,7 +115,7 @@ def layers(x, parameters):
     dense_channels = parameters['dense_channels']
     width = parameters['sample_length']
 
-    co_dense = tf.Variable(tf.random_normal([1, quantization_channels, dense_channels], mean=1.0, stddev=0.05),
+    co_dense = tf.Variable(tf.random_uniform([1, quantization_channels, dense_channels], -xavier_halfrange(quantization_channels), xavier_halfrange(quantization_channels)),
             dtype=tf.float32, name='dense_w')
     
     next_input = tf.squeeze(tf.nn.conv1d(tf.expand_dims(x, 0), co_dense, 1, 'SAME'), [0]) # , use_cudnn_on_gpu=False not supported...
@@ -122,7 +130,7 @@ def layers(x, parameters):
             sys.stdout.flush()
     skips_tensor = tf.nn.relu(tf.pack(skip_connections, 2))
 
-    co1 = tf.Variable(tf.random_normal([1, 1, len(dilations), 1], mean=1.0, stddev=0.05),
+    co1 = tf.Variable(tf.random_uniform([1, 1, len(dilations), 1], -xavier_halfrange_rect(len(dilations)), xavier_halfrange_rect(len(dilations))),
             dtype=tf.float32, name='co1')
     
     weighted_skips = tf.squeeze(tf.nn.conv2d(tf.expand_dims(skips_tensor, 0), co1, [1, 1, 1, 1], padding = 'SAME'), [0, 3])
@@ -130,7 +138,7 @@ def layers(x, parameters):
     # weighted_skips shape is [width, dense_channels]
     relu1 = tf.nn.relu(weighted_skips)
     
-    co2 = tf.Variable(tf.random_normal([1, dense_channels, 256], mean=1.0, stddev=0.05),
+    co2 = tf.Variable(tf.random_uniform([1, dense_channels, 256], -xavier_halfrange(dense_channels), xavier_halfrange(dense_channels)),
             dtype=tf.float32, name='co2')
     
     raw_output = tf.squeeze(tf.nn.conv1d(tf.expand_dims(relu1, 0), co2, 1, 'SAME'), [0])

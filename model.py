@@ -105,8 +105,7 @@ def layers(x, parameters):
     dilations = parameters['dilations']
     quantization_channels = parameters['quantization_channels']
     dense_channels = parameters['dense_channels']
-    
-    width = tf.shape(x)[0]
+    width = parameters['sample_length']
 
     co_dense = tf.Variable(tf.random_normal([1, quantization_channels, dense_channels], mean=1.0, stddev=0.05),
             dtype=tf.float32, name='dense_w')
@@ -136,7 +135,17 @@ def layers(x, parameters):
     
     raw_output = tf.squeeze(tf.nn.conv1d(tf.expand_dims(relu1, 0), co2, 1, 'SAME'), [0])
     # raw_output shape is [width, quantization_channels]
-    output = tf.nn.softmax(raw_output)
+    
+    # Too large tensor for the softmax crashes my GPU in CUDA_ERROR_ILLEGAL_ADDRESS error,
+    # so we can do it one by one instead of just this:
+    # output = tf.nn.softmax(raw_output)
+    # Note that the GPU seems to be exactly as fast as CPU.
+    sm_outputs = []
+    stride = 512
+    for i in range(width % stride):
+        length = min(stride, width - i * stride)
+        sm_outputs.append(tf.nn.softmax(tf.slice(raw_output, [i * stride, 0], [length, -1])))
+    output = tf.pack(sm_outputs, 0)
     return (output, raw_output)
 
 def create(parameters):

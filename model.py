@@ -149,7 +149,7 @@ def layers(x, parameters):
     # output = tf.nn.softmax(raw_output)
     # Note that the GPU seems to be exactly as fast as CPU.
     sm_outputs = []
-    stride = 512
+    stride = 128
     for i in range(width // stride):
         length = min(stride, width - i * stride)
         sm_outputs.append(tf.nn.softmax(tf.slice(raw_output, [i * stride, 0], [length, quantization_channels])))

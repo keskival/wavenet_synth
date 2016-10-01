@@ -38,7 +38,7 @@ generative_model = model.create_generative_model(parameters)
 
 init = tf.initialize_all_variables()
 saver = tf.train.Saver(tf.all_variables())
-gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.80, allocator_type = 'BFC')
+gpu_options = tf.GPUOptions()
 config = tf.ConfigProto(gpu_options=gpu_options)
 
 image = []

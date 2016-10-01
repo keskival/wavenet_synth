@@ -1,3 +1,6 @@
+# Copyright Igor Babuschkin 2016
+# MIT License
+
 from __future__ import division
 
 import tensorflow as tf

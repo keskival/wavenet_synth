@@ -50,14 +50,15 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
         last_losses = []
         last_loss = None
         best_loss = 1e20
-        sample_length = parameters['sample_length']
+        training_length = parameters['training_length']
         while now - start_time < 60 * minutes and iters_since_loss_improved < loss_improved_limit:
             if last_loss:
                 print "Time elapsed: ", now - start_time, ", last_loss: ", last_loss, \
                       ", best_loss: ", best_loss, \
                       ", iters_since_loss_improved: ", iters_since_loss_improved
 
-            batch_xs = manage_data.getNextTrainingBatchSequence(trainingData, sample_length)
+            # Note: Taking sample length times 2 to have a good amount of full input window examples.
+            batch_xs = manage_data.getNextTrainingBatchSequence(trainingData, training_length)
             
             # Fit training using batch data
 
@@ -74,7 +75,7 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
 
                 print "Iter {}".format(iter) + ", Loss={}".format(error)
 
-                test_x = manage_data.getNextTrainingBatchSequence(testingData, sample_length)
+                test_x = manage_data.getNextTrainingBatchSequence(testingData, training_length)
 
                 [testError] = sess.run([tf.stop_gradient(model['cost'])],
                     feed_dict={model['x']: test_x})

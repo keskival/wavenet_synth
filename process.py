@@ -31,4 +31,4 @@ model = model.create(params.parameters)
 training_data = channel1[0:len(channel1)/4*3]
 testing_data = channel1[len(channel1)/4*3:len(channel1)]
 
-train.train(params.parameters, model, training_data, testing_data, minutes=60 * 24, loss_improved_limit=1000)
+train.train(params.parameters, model, training_data, testing_data, minutes=60 * 24, loss_improved_limit=10000)

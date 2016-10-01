@@ -26,9 +26,17 @@ def xavier_halfrange_rect(n_in):
     ''' Returns the variance to use with Xavier initialization for rectified outputs '''
     return math.sqrt(12.0 * (2.0 / n_in)) / 2.0
 
-def mu_law(x, mu):
+def mu_law(x, mu, noise = 0):
     ml = tf.sign(x) * tf.log(mu * tf.abs(x) + 1.0) / tf.log(mu + 1.0)
-    # Scaling between -128 and 128 integers.
+    # Additive noise to prevent overlearning. Overlearning makes it difficult to retrieve patterns,
+    # so it is very problematic.
+    if noise > 0:
+        noise_vec = tf.random_normal(tf.shape(x), 0.0, noise)
+        #noise_vec = tf.Print(noise_vec, [noise_vec, ml], "Noise and mu law: ")
+        ml = tf.add_n([ml, noise_vec])
+        # Clamping between -1 and 1.
+        ml = tf.clip_by_value(ml, -1.0, 1.0)
+    # Scaling between 0 and quantization_channels-1 integers.
     return tf.cast((ml + 1.0) / 2.0 * mu + 0.5, tf.int32)
 
 # value shape is [width, quantization_channels]
@@ -113,7 +121,7 @@ def layers(x, parameters):
     dilations = parameters['dilations']
     quantization_channels = parameters['quantization_channels']
     dense_channels = parameters['dense_channels']
-    width = parameters['sample_length']
+    width = tf.shape(x)[0]
 
     co_dense = tf.Variable(tf.random_uniform([1, quantization_channels, dense_channels], -xavier_halfrange(quantization_channels), xavier_halfrange(quantization_channels)),
             dtype=tf.float32, name='dense_w')
@@ -146,27 +154,28 @@ def layers(x, parameters):
     
     # Too large tensor for the softmax crashes my GPU in CUDA_ERROR_ILLEGAL_ADDRESS error,
     # so we can do it one by one instead of just this:
-    # output = tf.nn.softmax(raw_output)
+    output = tf.nn.softmax(raw_output)
     # Note that the GPU seems to be exactly as fast as CPU.
-    sm_outputs = []
-    stride = 128
-    for i in range(width // stride):
-        length = min(stride, width - i * stride)
-        sm_outputs.append(tf.nn.softmax(tf.slice(raw_output, [i * stride, 0], [length, quantization_channels])))
-    output = tf.concat(0, sm_outputs)
+    #sm_outputs = []
+    #stride = 128
+    #for i in range(width // stride):
+    #    length = min(stride, width - i * stride)
+    #    sm_outputs.append(tf.nn.softmax(tf.slice(raw_output, [i * stride, 0], [length, quantization_channels])))
+    #output = tf.concat(0, sm_outputs)
     return (output, raw_output)
 
 def create(parameters):
     quantization_channels = parameters['quantization_channels']
-    sample_length = parameters['sample_length']
-    input = tf.placeholder(tf.float32, shape=(sample_length), name='input')
-    y = input
-    x = tf.pad(tf.slice(input, [0], [tf.shape(input)[0] - 1]), [[1, 0]])
-    # x is shifted right by one and padded by zero.
-    mu_lawd = mu_law(x, float(quantization_channels - 1))
+    training_length = parameters['training_length']
+    input = tf.placeholder(tf.float32, shape=(training_length), name='input')
+    # Removing the first item of y.
+    y = tf.slice(input, [1], [tf.shape(input)[0] - 1])
+    # Removing the last item x to be the last item to predict.
+    x = tf.slice(input, [0], [tf.shape(input)[0] - 1])
+    mu_lawd = mu_law(x, float(quantization_channels - 1), parameters['noise'])
     shifted_mu_law_x = tf.one_hot(mu_lawd, quantization_channels)
     
-    classes_y = mu_law(y, quantization_channels - 1)
+    classes_y = mu_law(y, quantization_channels - 1, 0)
     (output, raw_output) = layers(shifted_mu_law_x, parameters)
     cost = tf.nn.sparse_softmax_cross_entropy_with_logits(raw_output, classes_y, name='cost')
     
@@ -189,7 +198,7 @@ def create(parameters):
 def create_generative_model(parameters):
     quantization_channels = parameters['quantization_channels']
     input = tf.placeholder(tf.float32, name='input')
-    mu_law_input = tf.one_hot(mu_law(input, float(quantization_channels - 1)), quantization_channels)
+    mu_law_input = tf.one_hot(mu_law(input, float(quantization_channels - 1), 0), quantization_channels)
     
     (full_generated_output, _) = layers(mu_law_input, parameters)
     # Generated output is only the last predicted distribution

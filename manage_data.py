@@ -14,14 +14,19 @@ import json
 import itertools
 
 # Returns one sequence of n_steps.
-def getNextTrainingBatch(data, n_steps):
+def getNextTrainingBatch(data, n_steps, iter):
     # A random displacement to take the batch from.
     data_length = data.shape[0]
-    disp = random.randint(0, len(data[:]) - n_steps - 1) # 200000 + random.randint(0, 3) * 100000 #
+    if iter:
+        disp = iter * n_steps
+        if (disp > len(data[:]) - n_steps - 1):
+            disp = 0
+    else:
+        disp = random.randint(0, len(data[:]) - n_steps - 1)
     return data[disp:disp + n_steps]
 
-def getNextTrainingBatchSequence(data, sample_size):
+def getNextTrainingBatchSequence(data, sample_size, iter = None):
     result = []
-    sequence = getNextTrainingBatch(data, sample_size)
+    sequence = getNextTrainingBatch(data, sample_size, iter)
     x = np.asarray(sequence)
     return x

@@ -171,19 +171,16 @@ def layers(x, parameters, noise):
 def create(parameters):
     quantization_channels = parameters['quantization_channels']
     training_length = parameters['training_length']
-    input = tf.placeholder(tf.float32, shape=(training_length), name='input')
+    input = tf.placeholder(tf.float32, shape=(training_length - 1), name='input')
+    target_output = tf.placeholder(tf.float32, shape=(training_length - 1), name='target_output')
     schedule_step = tf.placeholder(tf.float32, name='schedule_step')
     noise = tf.placeholder(tf.float32, name="noise")
     input_noise = tf.placeholder(tf.float32, name="input_noise")
-    # Removing the first item of y.
-    y = tf.slice(input, [1], [tf.shape(input)[0] - 1])
-    # Removing the last item x to be the last item to predict.
-    x = tf.slice(input, [0], [tf.shape(input)[0] - 1])
-    mu_lawd = mu_law(x, float(quantization_channels - 1), input_noise)
-    shifted_mu_law_x = tf.one_hot(mu_lawd, quantization_channels)
+    mu_lawd = mu_law(input, float(quantization_channels - 1), input_noise)
+    mu_law_x = tf.one_hot(mu_lawd, quantization_channels)
     
-    classes_y = mu_law(y, quantization_channels - 1, 0)
-    (output, raw_output) = layers(shifted_mu_law_x, parameters, noise)
+    classes_y = mu_law(target_output, quantization_channels - 1, 0)
+    (output, raw_output) = layers(mu_law_x, parameters, noise)
     
     cost = tf.nn.sparse_softmax_cross_entropy_with_logits(raw_output, classes_y, name='cost')
     
@@ -198,7 +195,8 @@ def create(parameters):
     model = {
         'output': output,
         'optimizer': train_op,
-        'x': input,
+        'input': input,
+        'target_output': target_output,
         'cost': cost,
         'schedule_step': schedule_step,
         'input_noise': input_noise,
@@ -217,6 +215,6 @@ def create_generative_model(parameters):
 
     model = {
         'generated_output': generated_output,
-        'x': input
+        'input': input
     }
     return model

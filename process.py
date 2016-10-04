@@ -19,16 +19,14 @@ import train
 
 print params.parameters
 
-sampleFreq, snd = wavfile.read('red.wav')
+sample_freq, snd = wavfile.read('red.wav')
+sample_freq_test, test = wavfile.read('test.wav')
 snd = snd / (2.**15)
-channel1 = snd[:,0]
+snd_test = test / (2.**15)
+training_data = snd[:,0]
+testing_data = snd_test[:,0]
 parameters = params.parameters
 
 model = model.create(params.parameters)
-
-# Dividing the data from the given audio file to training (3/4) and test sets (1/4).
-# Validation set is not used here.
-training_data = channel1[0:len(channel1)/4*3]
-testing_data = channel1[len(channel1)/4*3:len(channel1)]
 
 train.train(params.parameters, model, training_data, testing_data, minutes=60 * 24, loss_improved_limit=10000)

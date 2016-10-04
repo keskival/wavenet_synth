@@ -45,7 +45,7 @@ with tf.Session(config=config) as sess:
     for i in range(48000 * 10):
         print i
         [probabilities] = sess.run([generative_model['generated_output']], feed_dict = {
-                generative_model['x']: signal
+                generative_model['input']: signal
             })
         image.append(probabilities)
 

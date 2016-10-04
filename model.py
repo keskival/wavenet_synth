@@ -30,12 +30,11 @@ def mu_law(x, mu, noise = 0):
     ml = tf.sign(x) * tf.log(mu * tf.abs(x) + 1.0) / tf.log(mu + 1.0)
     # Additive noise to prevent overlearning. Overlearning makes it difficult to retrieve patterns,
     # so it is very problematic.
-    if noise > 0:
-        noise_vec = tf.random_normal(tf.shape(x), 0.0, noise)
-        #noise_vec = tf.Print(noise_vec, [noise_vec, ml], "Noise and mu law: ")
-        ml = tf.add_n([ml, noise_vec])
-        # Clamping between -1 and 1.
-        ml = tf.clip_by_value(ml, -1.0, 1.0)
+    noise_vec = tf.random_normal(tf.shape(x), 0.0, noise)
+    #noise_vec = tf.Print(noise_vec, [noise_vec, ml], "Noise and mu law: ")
+    ml = tf.add_n([ml, noise_vec])
+    # Clamping between -1 and 1.
+    ml = tf.clip_by_value(ml, -1.0, 1.0)
     # Scaling between 0 and quantization_channels-1 integers.
     return tf.cast((ml + 1.0) / 2.0 * mu + 0.5, tf.int32)
 
@@ -80,13 +79,16 @@ def causal_atrous_conv1d(value, filters, rate, padding):
 
 # Returns a tuple of output to the next layer and skip output.
 # The shape of x is [width, dense_channels]
-def gated_unit(x, dilation, parameters, layer_index):
+def gated_unit(x, dilation, parameters, layer_index, noise):
     tf.histogram_summary('{}_x'.format(layer_index), x)
     
     filter_width = parameters['filter_width']
     dense_channels = parameters['dense_channels']
     dilation_channels = parameters['dilation_channels']
     quantization_channels = parameters['quantization_channels']
+
+    noise_vec = tf.random_normal(tf.shape(x), 0.0, noise)
+    x = x + noise_vec
 
     w1 = tf.Variable(tf.random_uniform([filter_width, dense_channels, dilation_channels], -xavier_halfrange(dense_channels), xavier_halfrange(dense_channels)),
             dtype=tf.float32, name='w1')
@@ -117,13 +119,14 @@ def gated_unit(x, dilation, parameters, layer_index):
 # The shape of x is [width, quantization_channels]
 # The shape of output is [width, quantization_channels]
 # Dilations is an array of [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1, 2, ..., 512]
-def layers(x, parameters):
+def layers(x, parameters, noise):
     dilations = parameters['dilations']
     quantization_channels = parameters['quantization_channels']
     dense_channels = parameters['dense_channels']
     width = tf.shape(x)[0]
 
-    co_dense = tf.Variable(tf.random_uniform([1, quantization_channels, dense_channels], -xavier_halfrange(quantization_channels), xavier_halfrange(quantization_channels)),
+    co_dense = tf.Variable(tf.random_uniform([1, quantization_channels, dense_channels],
+                                             -xavier_halfrange(quantization_channels), xavier_halfrange(quantization_channels)),
             dtype=tf.float32, name='dense_w')
     
     next_input = tf.squeeze(tf.nn.conv1d(tf.expand_dims(x, 0), co_dense, 1, 'SAME'), [0]) # , use_cudnn_on_gpu=False not supported...
@@ -131,14 +134,15 @@ def layers(x, parameters):
     for (i, dilation) in enumerate(dilations):
         with tf.name_scope('layer_{}'.format(i)):
             print "Creating layer {}".format(i)
-            (output, skip) = gated_unit(next_input, dilation, parameters, i)
+            (output, skip) = gated_unit(next_input, dilation, parameters, i, noise)
             # output and skip shapes are [width, dense_channels]
             next_input = output
             skip_connections.append(skip)
             sys.stdout.flush()
     skips_tensor = tf.nn.relu(tf.pack(skip_connections, 2))
 
-    co1 = tf.Variable(tf.random_uniform([1, 1, len(dilations), 1], -xavier_halfrange_rect(len(dilations)), xavier_halfrange_rect(len(dilations))),
+    co1 = tf.Variable(tf.random_uniform([1, 1, len(dilations), 1],
+                                        -xavier_halfrange_rect(len(dilations)), xavier_halfrange_rect(len(dilations))),
             dtype=tf.float32, name='co1')
     
     weighted_skips = tf.squeeze(tf.nn.conv2d(tf.expand_dims(skips_tensor, 0), co1, [1, 1, 1, 1], padding = 'SAME'), [0, 3])
@@ -168,30 +172,37 @@ def create(parameters):
     quantization_channels = parameters['quantization_channels']
     training_length = parameters['training_length']
     input = tf.placeholder(tf.float32, shape=(training_length), name='input')
+    schedule_step = tf.placeholder(tf.float32, name='schedule_step')
+    noise = tf.placeholder(tf.float32, name="noise")
+    input_noise = tf.placeholder(tf.float32, name="input_noise")
     # Removing the first item of y.
     y = tf.slice(input, [1], [tf.shape(input)[0] - 1])
     # Removing the last item x to be the last item to predict.
     x = tf.slice(input, [0], [tf.shape(input)[0] - 1])
-    mu_lawd = mu_law(x, float(quantization_channels - 1), parameters['noise'])
+    mu_lawd = mu_law(x, float(quantization_channels - 1), input_noise)
     shifted_mu_law_x = tf.one_hot(mu_lawd, quantization_channels)
     
     classes_y = mu_law(y, quantization_channels - 1, 0)
-    (output, raw_output) = layers(shifted_mu_law_x, parameters)
+    (output, raw_output) = layers(shifted_mu_law_x, parameters, noise)
+    
     cost = tf.nn.sparse_softmax_cross_entropy_with_logits(raw_output, classes_y, name='cost')
     
     tvars = tf.trainable_variables()
     gradients = tf.gradients(cost, tvars)
-    # grads, _ = tf.clip_by_global_norm(gradients, parameters['clip_gradients'])
+    grads, _ = tf.clip_by_global_norm(gradients, parameters['clip_gradients'])
     optimizer = tf.train.AdamOptimizer(learning_rate = parameters['learning_rate'])
 
-    train_op = optimizer.apply_gradients(zip(gradients, tvars))
+    train_op = optimizer.apply_gradients(zip(grads, tvars))
     tf.add_check_numerics_ops()
 
     model = {
         'output': output,
         'optimizer': train_op,
         'x': input,
-        'cost': cost
+        'cost': cost,
+        'schedule_step': schedule_step,
+        'input_noise': input_noise,
+        'noise': noise
     }
     return model
 
@@ -200,7 +211,7 @@ def create_generative_model(parameters):
     input = tf.placeholder(tf.float32, name='input')
     mu_law_input = tf.one_hot(mu_law(input, float(quantization_channels - 1), 0), quantization_channels)
     
-    (full_generated_output, _) = layers(mu_law_input, parameters)
+    (full_generated_output, _) = layers(mu_law_input, parameters, 0)
     # Generated output is only the last predicted distribution
     generated_output = tf.squeeze(tf.slice(full_generated_output, [tf.shape(full_generated_output)[0] - 1, 0], [1, -1]), [0])
 

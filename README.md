@@ -18,4 +18,4 @@ and the probability distribution used for generation in `image.mat`.
 
 You can draw the probability distribution in Octave using: `load("image.mat");imagesc(i');`
 
-You can play the generated sound in Octave using: `load("sound.mat");soundsc(s, 44100);`
+You can play the generated sound in Octave using: `load("sound.mat");soundsc(s, 48000);`

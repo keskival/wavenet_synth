@@ -18,17 +18,13 @@ import params
 import model
 import train
 import export_to_octave
-
-def de_mu_law(y, mu):
-    scaled = 2 * (y / mu) - 1
-    magnitude = (1 / mu) * ((1 + mu) ** abs(scaled) - 1)
-    return np.sign(scaled) * magnitude
-
+import operations
 parameters = params.parameters
 print parameters
 
 # 440 Hz
-t = np.asarray(range(parameters['sample_length'])) / 44100.0 * 2.0 * np.pi * 440
+#t = np.asarray(range(parameters['sample_length'])) / 48000.0 * 2.0 * np.pi * 440
+t = np.zeros(parameters['sample_length'])
 
 signal = np.sin(t)
 output_signal = np.asarray([])
@@ -46,16 +42,22 @@ image = []
 with tf.Session(config=config) as sess:
     saver.restore(sess, 'sound-model-best')
     # Creating a 10 second sample
-    for i in range(44100 * 10):
+    for i in range(48000 * 10):
         print i
         [probabilities] = sess.run([generative_model['generated_output']], feed_dict = {
                 generative_model['x']: signal
             })
         image.append(probabilities)
-        next_val = np.random.choice(np.arange(parameters['quantization_channels']), p=probabilities)
-        value = de_mu_law(next_val, float(parameters['quantization_channels'] - 1))
-        signal = np.append(signal, value)[1:]
-        output_signal = np.append(output_signal, value)
+
+        def choose_value(sample):
+            sample = np.asarray(sample)
+            sample /= sample.sum()
+            sampled = np.random.choice(np.arange(parameters['quantization_channels']), p=sample)
+            return operations.de_mu_law(sampled, float(parameters['quantization_channels'] - 1))
+        
+        next_val = choose_value(probabilities)
+        signal = np.append(signal, next_val)[1:]
+        output_signal = np.append(output_signal, next_val)
         export_to_octave.save('image.mat', 'i', image)
         wav = np.asarray(map(int, output_signal * (2.**15)), dtype=np.int16)
         export_to_octave.save('sound.mat', 's', wav)

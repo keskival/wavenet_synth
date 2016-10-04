@@ -1,0 +1,7 @@
+load("image.mat")
+load("sound.mat")
+subplot(1,2,1)
+imagesc(flipud(i'))
+subplot(1,2,2)
+plot(s)
+soundsc(repmat(s, [1, 10]), 48000)

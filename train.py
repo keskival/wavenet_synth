@@ -16,6 +16,7 @@ import math
 
 import manage_data
 import export_to_octave
+import operations
 
 import time
 import sys
@@ -41,10 +42,8 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
         writer = tf.train.SummaryWriter("logs", sess.graph)
     
         iter = 1
-        
-        step = 1
-        trainErrorTrend = []
-        testErrorTrend = []
+        train_error_trend = []
+        test_error_trend = []
         now = time.time()
         # Training for a specific number of minutes
         last_losses = []
@@ -63,24 +62,55 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
             # Fit training using batch data
 
             sess.run([model['optimizer']], feed_dict = {
-                model['x']: batch_xs
+                model['x']: batch_xs,
+                model['schedule_step']: iter,
+                model['noise']: parameters['noise'],
+                model['input_noise']: parameters['input_noise']
             })
-            if step % parameters['display_step'] == 0:
+            if iter % parameters['display_step'] == 0:
                 saver.save(sess, 'sound-model')
                 
-                [error, prediction] = sess.run([tf.stop_gradient(model['cost']), tf.stop_gradient(model['output'])], feed_dict = {
-                    model['x']: batch_xs
+                [error, output] = sess.run([tf.stop_gradient(model['cost']), model['output']], feed_dict = {
+                    model['x']: batch_xs,
+                    model['schedule_step']: iter,
+                    model['noise']: parameters['noise'],
+                    model['input_noise']: parameters['input_noise']
                 })
-                trainErrorTrend.append(error)
+                train_error_trend.append(error)
+                if (len(train_error_trend) > 10000):
+                    train_error_trend.pop(0)
+                export_to_octave.save('output.mat', 'output', output)
+                export_to_octave.save('input.mat', 'input', batch_xs)
+
+                def choose_value(sample):
+                    sample = np.asarray(sample)
+                    sample /= sample.sum()
+                    sampled = np.random.choice(np.arange(parameters['quantization_channels']), p=sample)
+                    return operations.de_mu_law(sampled, float(parameters['quantization_channels'] - 1))
+
+                realization = np.asarray(map(choose_value, output.tolist()))
+                export_to_octave.save('realization.mat', 'realization', realization)
 
                 print "Iter {}".format(iter) + ", Loss={}".format(error)
 
                 test_x = manage_data.getNextTrainingBatchSequence(testingData, training_length)
 
-                [testError] = sess.run([tf.stop_gradient(model['cost'])],
-                    feed_dict={model['x']: test_x})
-                testErrorTrend.append(testError)
-                last_losses.append(testError)
+                [test_error, test_output] = sess.run([tf.stop_gradient(model['cost']), tf.stop_gradient(model['output'])],
+                    feed_dict={
+                               model['x']: test_x,
+                               model['schedule_step']: iter,
+                               model['noise']: 0.0,
+                               model['input_noise']: 0.0
+                    })
+                test_realization = np.asarray(map(choose_value, test_output.tolist()))
+                export_to_octave.save('test_input.mat', 'test_input', test_x)
+                export_to_octave.save('test_realization.mat', 'test_realization', test_realization)
+
+                test_error_trend.append(test_error)
+                if (len(test_error_trend) > 10000):
+                    test_error_trend.pop(0)
+
+                last_losses.append(test_error)
                 # Taking the median of the 15 last testing losses.
                 if (len(last_losses) > 15):
                     last_losses.pop(0)
@@ -94,19 +124,16 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
                         saver.save(sess, 'sound-model-best')
                 else:
                     iters_since_loss_improved = iters_since_loss_improved + 1
-                print "Testing Error:", testError
+                print "Testing Error:", test_error
                 print "Last loss:", last_loss
                 if name:
-                    export_to_octave.save('train_error_' + name + '.mat', 'train_error', trainErrorTrend)
-                    export_to_octave.save('test_error_' + name + '.mat', 'test_error', testErrorTrend)
+                    export_to_octave.save('train_error_' + name + '.mat', 'train_error', train_error_trend)
+                    export_to_octave.save('test_error_' + name + '.mat', 'test_error', test_error_trend)
                 else:
-                    export_to_octave.save('train_error.mat', 'train_error', trainErrorTrend)
-                    export_to_octave.save('test_error.mat', 'test_error', testErrorTrend)
-
-                print "prediction: ", prediction
+                    export_to_octave.save('train_error.mat', 'train_error', train_error_trend)
+                    export_to_octave.save('test_error.mat', 'test_error', test_error_trend)
                 sys.stdout.flush()
             iter += 1
-            step += 1
             now = time.time()
         if name:
             saver.save(sess, 'sound-model-final-' + name, global_step=iter)

@@ -1,6 +1,6 @@
 parameters = {
     'learning_rate': 0.02,
-    'display_step': 100,
+    'display_step': 10,
     'input_noise': 0.02,
     'input_salt_and_pepper_noise': 0.02,
     'amplitude_plusminus_factor': 0.2,
@@ -14,6 +14,6 @@ parameters = {
     'quantization_channels': 256,
     'filter_width': 2,
     'sample_length': 1023 * 1 + 1,
-    'training_length': (1023 * 1 + 1) * 128,
+    'training_length': (1023 * 1 + 1) * 512,
     'clip_gradients': 20.0
 }

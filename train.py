@@ -102,7 +102,7 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
                     train_error_trend.pop(0)
                 #export_to_octave.save('output.mat', 'output', output)
                 export_to_octave.save('input.mat', 'input', original_x)
-                export_to_octave.save('corrupted.mat', 'input', x)
+                export_to_octave.save('corrupted.mat', 'corrupted', x)
 
                 def choose_value(sample):
                     sample = np.asarray(sample)

@@ -25,6 +25,8 @@ snd = snd / (2.**15)
 snd_test = test / (2.**15)
 training_data = snd[:,0]
 testing_data = snd_test[:,0]
+print "Length of training data: ", len(training_data)
+print "Length of test data: ", len(testing_data)
 parameters = params.parameters
 
 model = model.create(params.parameters)

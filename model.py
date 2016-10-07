@@ -171,8 +171,8 @@ def layers(x, parameters, noise):
 def create(parameters):
     quantization_channels = parameters['quantization_channels']
     training_length = parameters['training_length']
-    input = tf.placeholder(tf.float32, shape=(training_length - 1), name='input')
-    target_output = tf.placeholder(tf.float32, shape=(training_length - 1), name='target_output')
+    input = tf.placeholder(tf.float32, name='input')
+    target_output = tf.placeholder(tf.float32, name='target_output')
     schedule_step = tf.placeholder(tf.float32, name='schedule_step')
     noise = tf.placeholder(tf.float32, name="noise")
     input_noise = tf.placeholder(tf.float32, name="input_noise")

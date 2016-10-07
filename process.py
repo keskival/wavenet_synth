@@ -31,4 +31,5 @@ parameters = params.parameters
 
 model = model.create(params.parameters)
 
-train.train(params.parameters, model, training_data, testing_data, minutes=60 * 24, loss_improved_limit=10000)
+train.train(params.parameters, model, training_data, testing_data, minutes=60 * 24 * 7, loss_improved_limit=10000)
+#train.train(params.parameters, model, training_data, testing_data, starting_model="sound-model", minutes=60 * 24 * 7, loss_improved_limit=10000)

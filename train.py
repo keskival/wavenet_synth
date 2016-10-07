@@ -37,7 +37,7 @@ def make_x_and_y(x, noise, amplitude_plusminus_factor):
         new_x[index] = random.uniform(-1.0, 1.0)
     return (x, new_x, y)
 
-def train(parameters, model, trainingData, testingData, startingModel=None, minutes=60 * 24, name="", loss_improved_limit=50):
+def train(parameters, model, trainingData, testingData, starting_model=None, minutes=60 * 24, name="", loss_improved_limit=50):
     print('Launching training.')
 
     init = tf.initialize_all_variables()
@@ -48,11 +48,17 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
     start_time = time.time()
     iters_since_loss_improved = 0
     with tf.Session(config=config) as sess:
-        if startingModel:
-            saver.restore(sess, startingModel)
+        if starting_model:
+            saver.restore(sess, starting_model)
         else:
             sess.run(init)
         
+        def choose_value(sample):
+            sample = np.asarray(sample)
+            sample /= sample.sum()
+            sampled = np.random.choice(np.arange(parameters['quantization_channels']), p=sample)
+            return operations.de_mu_law(sampled, float(parameters['quantization_channels'] - 1))
+
         writer = tf.train.SummaryWriter("logs", sess.graph)
     
         iter = 1
@@ -64,24 +70,39 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
         last_loss = None
         best_loss = 1e20
         training_length = parameters['training_length']
-        while now - start_time < 60 * minutes and iters_since_loss_improved < loss_improved_limit:
+        while now - start_time < 60 * minutes or iters_since_loss_improved < loss_improved_limit:
 
             # Note: Taking sample length times 2 to have a good amount of full input window examples.
             x = manage_data.getNextTrainingBatchSequence(trainingData, training_length)
             (original_x, x, y) = make_x_and_y(x, parameters['input_salt_and_pepper_noise'],
                                               parameters['amplitude_plusminus_factor'])
 
-            # Fit training using batch data
-
-            (_, cost) = sess.run([model['optimizer'], model['cost']], feed_dict = {
+            # Create first estimation and optimize for the first order.
+            [output, _, cost] = sess.run([tf.stop_gradient(model['output']), model['optimizer'], tf.stop_gradient(model['cost'])], feed_dict = {
                 model['input']: x,
                 model['schedule_step']: iter,
                 model['noise']: parameters['noise'],
                 model['input_noise']: parameters['input_noise'],
                 model['target_output']: y
             })
+            
+            # Doing a second order optimization also, to prevent divergence.
+            first_order_realization = np.asarray(map(choose_value, output.tolist()))
+            # Removing the final x prediction, and the first y item.
+            second_order_length = np.size(first_order_realization, 0) - 1
+            second_order_x = np.copy(np.asarray(first_order_realization[0:second_order_length]))
+            second_order_y = np.copy(np.asarray(y[1:second_order_length + 1]))
+
+            [_, second_order_cost] = sess.run([model['optimizer'], tf.stop_gradient(model['cost'])], feed_dict = {
+                model['input']: second_order_x,
+                model['schedule_step']: iter,
+                model['noise']: parameters['noise'],
+                model['input_noise']: parameters['input_noise'],
+                model['target_output']: second_order_y
+            })
+            
             print "Time elapsed: ", now - start_time, ", iter: ", iter, \
-                ", training cost: ", cost
+                ", training cost: ", cost, ", second order cost: ", second_order_cost
                 
             if iter % parameters['display_step'] == 0:
                 if last_loss:
@@ -90,7 +111,7 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
                         ", iters_since_loss_improved: ", iters_since_loss_improved
                 saver.save(sess, 'sound-model')
                 
-                [error, output] = sess.run([tf.stop_gradient(model['cost']), model['output']], feed_dict = {
+                [error, output] = sess.run([tf.stop_gradient(model['cost']), tf.stop_gradient(model['output'])], feed_dict = {
                     model['input']: x,
                     model['schedule_step']: iter,
                     model['noise']: parameters['noise'],
@@ -98,17 +119,11 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
                     model['target_output']: y
                 })
                 train_error_trend.append(error)
-                if (len(train_error_trend) > 10000):
+                if (len(train_error_trend) > 100):
                     train_error_trend.pop(0)
                 #export_to_octave.save('output.mat', 'output', output)
                 export_to_octave.save('input.mat', 'input', original_x)
                 export_to_octave.save('corrupted.mat', 'corrupted', x)
-
-                def choose_value(sample):
-                    sample = np.asarray(sample)
-                    sample /= sample.sum()
-                    sampled = np.random.choice(np.arange(parameters['quantization_channels']), p=sample)
-                    return operations.de_mu_law(sampled, float(parameters['quantization_channels'] - 1))
 
                 realization = np.asarray(map(choose_value, output.tolist()))
                 export_to_octave.save('realization.mat', 'realization', realization)
@@ -131,7 +146,7 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
                 export_to_octave.save('test_realization.mat', 'test_realization', test_realization)
 
                 test_error_trend.append(test_error)
-                if (len(test_error_trend) > 10000):
+                if (len(test_error_trend) > 100):
                     test_error_trend.pop(0)
 
                 last_losses.append(test_error)
@@ -156,7 +171,7 @@ def train(parameters, model, trainingData, testingData, startingModel=None, minu
                 else:
                     export_to_octave.save('train_error.mat', 'train_error', train_error_trend)
                     export_to_octave.save('test_error.mat', 'test_error', test_error_trend)
-                sys.stdout.flush()
+            sys.stdout.flush()
             iter += 1
             now = time.time()
         if name:

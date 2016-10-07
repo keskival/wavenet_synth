@@ -23,8 +23,9 @@ parameters = params.parameters
 print parameters
 
 # 440 Hz
-#t = np.asarray(range(parameters['sample_length'])) / 48000.0 * 2.0 * np.pi * 440
-t = np.zeros(parameters['sample_length'])
+t = np.asarray(range(parameters['sample_length'])) / 48000.0 * 2.0 * np.pi * 440
+# Zeros
+#t = np.zeros(parameters['sample_length'])
 
 signal = np.sin(t)
 output_signal = np.asarray([])

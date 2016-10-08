@@ -19,7 +19,7 @@ import train
 
 print params.parameters
 
-sample_freq, snd = wavfile.read('red.wav')
+sample_freq, snd = wavfile.read('corpus.wav')
 sample_freq_test, test = wavfile.read('test.wav')
 snd = snd / (2.**15)
 snd_test = test / (2.**15)

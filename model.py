@@ -30,11 +30,11 @@ def mu_law(x, mu, noise = 0):
     ml = tf.sign(x) * tf.log(mu * tf.abs(x) + 1.0) / tf.log(mu + 1.0)
     # Additive noise to prevent overlearning. Overlearning makes it difficult to retrieve patterns,
     # so it is very problematic.
-    noise_vec = tf.random_normal(tf.shape(x), 0.0, noise)
+    #noise_vec = tf.random_normal(tf.shape(x), 0.0, noise)
     #noise_vec = tf.Print(noise_vec, [noise_vec, ml], "Noise and mu law: ")
-    ml = tf.add_n([ml, noise_vec])
+    #ml = tf.add_n([ml, noise_vec])
     # Clamping between -1 and 1.
-    ml = tf.clip_by_value(ml, -1.0, 1.0)
+    #ml = tf.clip_by_value(ml, -1.0, 1.0)
     # Scaling between 0 and quantization_channels-1 integers.
     return tf.cast((ml + 1.0) / 2.0 * mu + 0.5, tf.int32)
 
@@ -87,8 +87,8 @@ def gated_unit(x, dilation, parameters, layer_index, noise):
     dilation_channels = parameters['dilation_channels']
     quantization_channels = parameters['quantization_channels']
 
-    noise_vec = tf.random_normal(tf.shape(x), 0.0, noise)
-    x = x + noise_vec
+    #noise_vec = tf.random_normal(tf.shape(x), 0.0, noise)
+    #x = x + noise_vec
 
     w1 = tf.Variable(tf.random_uniform([filter_width, dense_channels, dilation_channels], -xavier_halfrange(dense_channels), xavier_halfrange(dense_channels)),
             dtype=tf.float32, name='w1')

@@ -13,6 +13,7 @@ import math
 import time
 import pyaudio
 import matplotlib.pyplot as plt
+import scipy.io as sio
 
 import params
 import model
@@ -23,12 +24,17 @@ parameters = params.parameters
 print parameters
 
 # 440 Hz
-t = np.asarray(range(parameters['sample_length'])) / 48000.0 * 2.0 * np.pi * 440
+#t = np.asarray(range(parameters['sample_length'])) / 48000.0 * 2.0 * np.pi * 440
+#signal = np.sin(t)
 # Zeros
 #t = np.zeros(parameters['sample_length'])
+#(_, a1) = sio.wavfile.read("seeds/a1.wav")
+#signal = a1 / (2.**15)
+(_, i) = sio.wavfile.read("input.wav")
+signal = i / (2.**15)
 
-signal = np.sin(t)
-output_signal = np.asarray([])
+output_signal = np.copy(np.asarray(signal))
+signal = signal[len(signal) - parameters['sample_length'] : len(signal)]
 p = pyaudio.PyAudio()
 
 generative_model = model.create_generative_model(parameters)

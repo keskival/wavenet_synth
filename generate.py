@@ -34,7 +34,7 @@ print parameters
 signal = i / (2.**15)
 
 output_signal = np.copy(np.asarray(signal))
-signal = signal[len(signal) - parameters['sample_length'] : len(signal)]
+signal = np.asarray(signal[len(signal) - parameters['sample_length'] : len(signal)])
 p = pyaudio.PyAudio()
 
 generative_model = model.create_generative_model(parameters)
@@ -48,26 +48,35 @@ image = []
 
 with tf.Session(config=config) as sess:
     saver.restore(sess, 'sound-model-best')
-    # Creating a 10 second sample
-    for i in range(48000 * 10):
-        print i
+    # Creating a 100 second sample
+    next_val = 0.0
+    for i in range(48000 * 100):
+        print "Step: ", i
         [probabilities] = sess.run([generative_model['generated_output']], feed_dict = {
                 generative_model['input']: signal
             })
-        image.append(probabilities)
+        #image.append(probabilities)
 
-        def choose_value(sample):
+        def choose_value(sample, prev_value):
             sample = np.asarray(sample)
             sample /= sample.sum()
             sampled = np.random.choice(np.arange(parameters['quantization_channels']), p=sample)
-            return operations.de_mu_law(sampled, float(parameters['quantization_channels'] - 1))
+            probability_selected = sample[sampled]
+            # Decreasing the weight of small probability selections.
+            #factor = min(1.0, probability_selected / 0.03)
+            new_value = operations.de_mu_law(sampled, float(parameters['quantization_channels'] - 1))
+            #final_sample = new_value * factor + prev_value * (1-factor)
+            print "Sampled, new_value, probability_selected: ", sampled, new_value, probability_selected
+            return new_value
         
-        next_val = choose_value(probabilities)
+        next_val = choose_value(probabilities, next_val)
         signal = np.append(signal, next_val)[1:]
         output_signal = np.append(output_signal, next_val)
-        export_to_octave.save('image.mat', 'i', image)
+        #export_to_octave.save('image.mat', 'i', image)
         wav = np.asarray(map(int, output_signal * (2.**15)), dtype=np.int16)
+        wav2 = np.asarray(map(int, signal * (2.**15)), dtype=np.int16)
         export_to_octave.save('sound.mat', 's', wav)
+        export_to_octave.save('sound2.mat', 's', wav2)
     stream = p.open(format=p.get_format_from_width(2),
                 channels=1,
                 rate=sampleFreq,

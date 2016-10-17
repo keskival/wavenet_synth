@@ -30,12 +30,12 @@ def make_x_and_y(x, noise, amplitude_plusminus_factor):
     y = np.copy(np.asarray(x[1:length + 1]))
     # Removing the last item x to be the last item to predict.
     new_x = np.copy(np.asarray(x[0:length]))
-    #new_x = np.clip(new_x * random.uniform(1.0 - amplitude_plusminus_factor, 1.0 + amplitude_plusminus_factor), -1.0, 1.0)
+    new_x = np.clip(new_x * random.uniform(1.0 - amplitude_plusminus_factor, 1.0 + amplitude_plusminus_factor), -1.0, 1.0)
     # Adding salt and pepper noise to x.
-    #number_of_corruptions = int(noise * length)
-    #for i in range(number_of_corruptions):
-    #    index = random.randint(0, length - 1)
-    #    new_x[index] = random.uniform(-1.0, 1.0)
+    number_of_corruptions = int(noise * length)
+    for i in range(number_of_corruptions):
+        index = random.randint(0, length - 1)
+        new_x[index] = random.uniform(-1.0, 1.0)
     return (x, new_x, y)
 
 def train(parameters, model, trainingData, testingData, starting_model=None, minutes=60 * 24, name="", loss_improved_limit=50):
@@ -79,7 +79,7 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
                                               parameters['amplitude_plusminus_factor'])
 
             # Create first estimation and optimize for the first order.
-            [output, _, cost] = sess.run([tf.stop_gradient(model['output']), model['optimizer'], tf.stop_gradient(model['cost'])], feed_dict = {
+            [_, cost, reg_loss] = sess.run([model['optimizer'], tf.stop_gradient(model['cost']), tf.stop_gradient(model['reg_loss'])], feed_dict = {
                 model['input']: x,
                 model['schedule_step']: iter,
                 model['noise']: parameters['noise'],
@@ -88,38 +88,39 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
             })
             
             # Doing a second order optimization also, to prevent divergence.
-            first_order_realization = np.asarray(map(choose_value, output.tolist()))
+            #first_order_realization = np.asarray(map(choose_value, output.tolist()))
             # Removing the final x prediction, and the first y item.
-            second_order_length = np.size(first_order_realization, 0) - 1
-            second_order_x = np.copy(np.asarray(first_order_realization[0:second_order_length]))
-            second_order_y = np.copy(np.asarray(y[1:second_order_length + 1]))
+            #second_order_length = np.size(first_order_realization, 0) - 1
+            #second_order_x = np.copy(np.asarray(first_order_realization[0:second_order_length]))
+            #second_order_y = np.copy(np.asarray(y[1:second_order_length + 1]))
 
-            [output, _, second_order_cost] = sess.run([tf.stop_gradient(model['output']), model['optimizer'], tf.stop_gradient(model['cost'])], feed_dict = {
-                model['input']: second_order_x,
-                model['schedule_step']: iter,
-                model['noise']: parameters['noise'],
-                model['input_noise']: parameters['input_noise'],
-                model['target_output']: second_order_y
-            })
+            #[output, _, second_order_cost] = sess.run([tf.stop_gradient(model['output']), model['optimizer'], tf.stop_gradient(model['cost'])], feed_dict = {
+            #    model['input']: second_order_x,
+            #    model['schedule_step']: iter,
+            #    model['noise']: parameters['noise'],
+            #    model['input_noise']: parameters['input_noise'],
+            #    model['target_output']: second_order_y
+            #})
             
             # Doing a second order optimization also, to prevent divergence.
-            second_order_realization = np.asarray(map(choose_value, output.tolist()))
+            #second_order_realization = np.asarray(map(choose_value, output.tolist()))
             # Removing the final x prediction, and the first y item.
-            third_order_length = np.size(second_order_realization, 0) - 1
-            third_order_x = np.copy(np.asarray(second_order_realization[0:third_order_length]))
-            third_order_y = np.copy(np.asarray(y[1:third_order_length + 1]))
+            #third_order_length = np.size(second_order_realization, 0) - 1
+            #third_order_x = np.copy(np.asarray(second_order_realization[0:third_order_length]))
+            #third_order_y = np.copy(np.asarray(y[1:third_order_length + 1]))
 
-            [_, third_order_cost] = sess.run([model['optimizer'], tf.stop_gradient(model['cost'])], feed_dict = {
-                model['input']: third_order_x,
-                model['schedule_step']: iter,
-                model['noise']: parameters['noise'],
-                model['input_noise']: parameters['input_noise'],
-                model['target_output']: third_order_y
-            })
+            #[_, third_order_cost] = sess.run([model['optimizer'], tf.stop_gradient(model['cost'])], feed_dict = {
+            #    model['input']: third_order_x,
+            #    model['schedule_step']: iter,
+            #    model['noise']: parameters['noise'],
+            #    model['input_noise']: parameters['input_noise'],
+            #    model['target_output']: third_order_y
+            #})
 
             print "Time elapsed: ", now - start_time, ", iter: ", iter, \
-                ", training cost: ", np.mean(cost), ", second order cost: ", np.mean(second_order_cost), \
-                ", third order cost: ", np.mean(third_order_cost)
+                ", training cost: ", np.mean(cost), ", reg_loss: ", np.mean(reg_loss)
+                #, ", second order cost: ", np.mean(second_order_cost), \
+                #", third order cost: ", np.mean(third_order_cost)
                 
             if iter % parameters['display_step'] == 0:
                 if last_loss:

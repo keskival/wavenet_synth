@@ -25,7 +25,7 @@ print parameters
 
 # 440 Hz
 #t = np.asarray(range(parameters['sample_length'])) / 48000.0 * 2.0 * np.pi * 440
-#signal = np.sin(t)
+#signal = np.sin(t)*0.3
 # Zeros
 #t = np.zeros(parameters['sample_length'])
 #(_, a1) = sio.wavfile.read("seeds/a1.wav")
@@ -35,6 +35,11 @@ signal = i / (2.**15)
 
 output_signal = np.copy(np.asarray(signal))
 signal = np.asarray(signal[len(signal) - parameters['sample_length'] : len(signal)])
+
+quantization_channels = parameters['quantization_channels']
+mu_law_input = operations.one_hot(operations.mu_law(signal, float(quantization_channels - 1)),
+                                  quantization_channels)
+
 p = pyaudio.PyAudio()
 
 generative_model = model.create_generative_model(parameters)
@@ -49,17 +54,21 @@ image = []
 with tf.Session(config=config) as sess:
     saver.restore(sess, 'sound-model-best')
     # Creating a 100 second sample
-    next_val = 0.0
     for i in range(48000 * 100):
         print "Step: ", i
         [probabilities] = sess.run([generative_model['generated_output']], feed_dict = {
-                generative_model['input']: signal
+#                generative_model['input']: signal
+                generative_model['mu_law_input']: mu_law_input
             })
         #image.append(probabilities)
 
-        def choose_value(sample, prev_value):
+        def choose_value(sample):
             sample = np.asarray(sample)
-            sample /= sample.sum()
+            temperature = 0.2
+            
+            cooled = np.log(sample) / temperature
+            sample = np.exp(cooled - np.max(cooled, axis=-1))
+            sample /= np.sum(sample, axis=-1)
             sampled = np.random.choice(np.arange(parameters['quantization_channels']), p=sample)
             probability_selected = sample[sampled]
             # Decreasing the weight of small probability selections.
@@ -67,10 +76,13 @@ with tf.Session(config=config) as sess:
             new_value = operations.de_mu_law(sampled, float(parameters['quantization_channels'] - 1))
             #final_sample = new_value * factor + prev_value * (1-factor)
             print "Sampled, new_value, probability_selected: ", sampled, new_value, probability_selected
-            return new_value
+            return (new_value, sampled)
         
-        next_val = choose_value(probabilities, next_val)
-        signal = np.append(signal, next_val)[1:]
+        (next_val, next_val_raw) = choose_value(probabilities)
+        #signal = np.append(signal, next_val)[1:]
+        mu_law_input = (np.concatenate((mu_law_input, operations.one_hot(next_val_raw, quantization_channels)),
+                                       axis=0))[1:, :]
+        
         output_signal = np.append(output_signal, next_val)
         #export_to_octave.save('image.mat', 'i', image)
         wav = np.asarray(map(int, output_signal * (2.**15)), dtype=np.int16)

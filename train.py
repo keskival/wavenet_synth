@@ -146,7 +146,7 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
                 realization = np.asarray(map(choose_value, output.tolist()))
                 export_to_octave.save('realization.mat', 'realization', realization)
 
-                print "Iter {}".format(iter) + ", Testing Loss={}".format(np.mean(error))
+                print "Iter: ", iter, ", training Loss: ", np.mean(error)
 
                 test_x = manage_data.getNextTrainingBatchSequence(testingData, training_length)
                 (original_test_x, test_x, test_y) = make_x_and_y(test_x, 0.0, 0.0)
@@ -181,8 +181,7 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
                         saver.save(sess, 'sound-model-best')
                 else:
                     iters_since_loss_improved = iters_since_loss_improved + 1
-                print "Testing Error:", np.mean(test_error)
-                print "Last loss:", last_loss
+                print "Testing loss: ", np.mean(test_error), ", new median testing loss: ", last_loss, ", time: ", time.asctime()
                 ##if name:
                 ##    export_to_octave.save('train_error_' + name + '.mat', 'train_error', train_error_trend)
                 ##    export_to_octave.save('test_error_' + name + '.mat', 'test_error', test_error_trend)

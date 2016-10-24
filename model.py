@@ -182,7 +182,7 @@ def create(parameters):
     classes_y = mu_law(target_output, quantization_channels - 1, 0)
     (output, raw_output, reg_loss) = layers(mu_law_x, parameters, noise)
     # Normalizing to the sane range
-    reg_loss = reg_loss / 10000.0
+    reg_loss = reg_loss / 100000.0
     
     cost = tf.nn.sparse_softmax_cross_entropy_with_logits(raw_output, classes_y, name='cost')
     cost_plus_regularization = cost + reg_loss
@@ -210,8 +210,9 @@ def create(parameters):
 
 def create_generative_model(parameters):
     quantization_channels = parameters['quantization_channels']
-    input = tf.placeholder(tf.float32, name='input')
-    mu_law_input = tf.one_hot(mu_law(input, float(quantization_channels - 1), 0), quantization_channels)
+    #input = tf.placeholder(tf.float32, name='input')
+    mu_law_input = tf.placeholder(tf.float32, name='mu_law_input')
+    #mu_law_input = tf.one_hot(mu_law(input, float(quantization_channels - 1), 0), quantization_channels)
     
     (full_generated_output, _, _) = layers(mu_law_input, parameters, 0)
     # Generated output is only the last predicted distribution
@@ -219,6 +220,7 @@ def create_generative_model(parameters):
 
     model = {
         'generated_output': generated_output,
-        'input': input
+        'input': input,
+        'mu_law_input': mu_law_input
     }
     return model

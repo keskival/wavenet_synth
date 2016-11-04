@@ -156,16 +156,7 @@ def layers(x, parameters, noise):
     raw_output = conv1d(relu1, co2)
     # raw_output shape is [width, quantization_channels]
     
-    # Too large tensor for the softmax crashes my GPU in CUDA_ERROR_ILLEGAL_ADDRESS error,
-    # so we can do it one by one instead of just this:
     output = tf.nn.softmax(raw_output)
-    # Note that the GPU seems to be exactly as fast as CPU.
-    #sm_outputs = []
-    #stride = 128
-    #for i in range(width // stride):
-    #    length = min(stride, width - i * stride)
-    #    sm_outputs.append(tf.nn.softmax(tf.slice(raw_output, [i * stride, 0], [length, quantization_channels])))
-    #output = tf.concat(0, sm_outputs)
     return (output, raw_output, reg_loss)
 
 def create(parameters):
@@ -181,7 +172,8 @@ def create(parameters):
     
     classes_y = mu_law(target_output, quantization_channels - 1, 0)
     (output, raw_output, reg_loss) = layers(mu_law_x, parameters, noise)
-    # Normalizing to the sane range
+    # Normalizing to the sane range. This is only necessary if we sum the
+    # regularization loss with the normal loss.
     reg_loss = reg_loss / 100000.0
     
     cost = tf.nn.sparse_softmax_cross_entropy_with_logits(raw_output, classes_y, name='cost')
@@ -193,7 +185,6 @@ def create(parameters):
     optimizer = tf.train.AdamOptimizer(learning_rate = parameters['learning_rate'])
 
     train_op = optimizer.apply_gradients(zip(grads, tvars))
-    #tf.add_check_numerics_ops()
 
     model = {
         'output': output,
@@ -210,9 +201,7 @@ def create(parameters):
 
 def create_generative_model(parameters):
     quantization_channels = parameters['quantization_channels']
-    #input = tf.placeholder(tf.float32, name='input')
     mu_law_input = tf.placeholder(tf.float32, name='mu_law_input')
-    #mu_law_input = tf.one_hot(mu_law(input, float(quantization_channels - 1), 0), quantization_channels)
     
     (full_generated_output, _, _) = layers(mu_law_input, parameters, 0)
     # Generated output is only the last predicted distribution
@@ -220,7 +209,6 @@ def create_generative_model(parameters):
 
     model = {
         'generated_output': generated_output,
-        'input': input,
         'mu_law_input': mu_law_input
     }
     return model

@@ -23,6 +23,8 @@ import sys
 import scipy.fftpack
 import numpy.fft
 
+import re
+
 def make_x_and_y(x, noise, amplitude_plusminus_factor):
     # Length of shifted x and y
     length = np.size(x, 0) - 1
@@ -41,8 +43,18 @@ def make_x_and_y(x, noise, amplitude_plusminus_factor):
 def train(parameters, model, trainingData, testingData, starting_model=None, minutes=60 * 24, name="", loss_improved_limit=50):
     print('Launching training.')
 
-    init = tf.initialize_all_variables()
-    saver = tf.train.Saver(tf.all_variables())
+    variables_to_restore = dict()
+    for var in tf.all_variables():
+        # Skipping Adam specific variables in restore.
+        realname = re.match("(.*):0", var.name).group(1)
+        if re.match(".*/Adam:0", var.name):
+            pass
+        elif re.match(".*/Adam_1:0", var.name):
+            pass
+        else:
+            variables_to_restore[realname] = var
+    init = tf.initialize_variables(tf.all_variables())
+    saver = tf.train.Saver(variables_to_restore)
     # Launch the graph
     gpu_options = tf.GPUOptions()
     config = tf.ConfigProto(gpu_options=gpu_options)
@@ -50,6 +62,7 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
     iters_since_loss_improved = 0
     with tf.Session(config=config) as sess:
         if starting_model:
+            sess.run(init)
             saver.restore(sess, starting_model)
         else:
             sess.run(init)
@@ -87,36 +100,6 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
                 model['target_output']: y
             })
             
-            # Doing a second order optimization also, to prevent divergence.
-            #first_order_realization = np.asarray(map(choose_value, output.tolist()))
-            # Removing the final x prediction, and the first y item.
-            #second_order_length = np.size(first_order_realization, 0) - 1
-            #second_order_x = np.copy(np.asarray(first_order_realization[0:second_order_length]))
-            #second_order_y = np.copy(np.asarray(y[1:second_order_length + 1]))
-
-            #[output, _, second_order_cost] = sess.run([tf.stop_gradient(model['output']), model['optimizer'], tf.stop_gradient(model['cost'])], feed_dict = {
-            #    model['input']: second_order_x,
-            #    model['schedule_step']: iter,
-            #    model['noise']: parameters['noise'],
-            #    model['input_noise']: parameters['input_noise'],
-            #    model['target_output']: second_order_y
-            #})
-            
-            # Doing a second order optimization also, to prevent divergence.
-            #second_order_realization = np.asarray(map(choose_value, output.tolist()))
-            # Removing the final x prediction, and the first y item.
-            #third_order_length = np.size(second_order_realization, 0) - 1
-            #third_order_x = np.copy(np.asarray(second_order_realization[0:third_order_length]))
-            #third_order_y = np.copy(np.asarray(y[1:third_order_length + 1]))
-
-            #[_, third_order_cost] = sess.run([model['optimizer'], tf.stop_gradient(model['cost'])], feed_dict = {
-            #    model['input']: third_order_x,
-            #    model['schedule_step']: iter,
-            #    model['noise']: parameters['noise'],
-            #    model['input_noise']: parameters['input_noise'],
-            #    model['target_output']: third_order_y
-            #})
-
             print "Time elapsed: ", now - start_time, ", iter: ", iter, \
                 ", training cost: ", np.mean(cost), ", reg_loss: ", np.mean(reg_loss)
                 #, ", second order cost: ", np.mean(second_order_cost), \

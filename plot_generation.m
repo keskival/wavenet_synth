@@ -1,9 +1,12 @@
-load("i.mat")
-load("s.mat")
-subplot(1,2,1)
-imagesc(flipud(i'))
-subplot(1,2,2)
-s = s(:,520000:size(s)(2));
+load("sound.mat")
+load("image.mat")
+subplot(1,1,1)
+size(s)
+seed_length = 1024 * 512;
+s = s(:,seed_length:size(s)(2));
+subplot(1, 2, 1)
 plot(s)
-soundsc(repmat(s, [1, 1]), 48000)
+soundsc(s, 48000)
+subplot(1, 2, 2)
+imagesc(flipud(i'))
 wavwrite(s, 48000, "generated.wav")

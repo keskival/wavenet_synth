@@ -16,5 +16,6 @@ parameters = {
     'filter_width': 2,
     'sample_length': 1023 * 4 + 1,
     'training_length': 1024 * 512,
-    'clip_gradients': 1000.0
+    'clip_gradients': 1000.0,
+    'temperature': 0.7
 }

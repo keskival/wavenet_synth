@@ -1,5 +1,5 @@
 parameters = {
-    'learning_rate': 0.04,
+    'learning_rate': 0.0005,
     'display_step': 10,
     'input_noise': 0.005,
     'input_salt_and_pepper_noise': 0.005,
@@ -17,5 +17,5 @@ parameters = {
     'sample_length': 1023 * 4 + 1,
     'training_length': 1024 * 512,
     'clip_gradients': 1000.0,
-    'temperature': 0.7
+    'temperature': 1.0
 }

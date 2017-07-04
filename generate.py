@@ -67,7 +67,7 @@ with tf.Session(config=config) as sess:
         [probabilities] = sess.run([generative_model['generated_output']], feed_dict = {
                 generative_model['mu_law_input']: mu_law_input
             })
-        image.append(probabilities)
+#        image.append(probabilities)
 
         def choose_value(sample):
             sample = np.asarray(sample)
@@ -87,7 +87,7 @@ with tf.Session(config=config) as sess:
                                        axis=0))[1:, :]
         
         output_signal = np.append(output_signal, next_val)
-        export_to_octave.save('image.mat', 'i', image)
+#        export_to_octave.save('image.mat', 'i', image)
         wav = np.asarray(map(int, output_signal * (2.**15)), dtype=np.int16)
         wav2 = np.asarray(map(int, signal * (2.**15)), dtype=np.int16)
         export_to_octave.save('sound.mat', 's', wav)

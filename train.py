@@ -73,7 +73,7 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
             sampled = np.random.choice(np.arange(parameters['quantization_channels']), p=sample)
             return operations.de_mu_law(sampled, float(parameters['quantization_channels'] - 1))
 
-        writer = tf.train.SummaryWriter("logs", sess.graph)
+        writer = tf.summary.FileWriter("logs", sess.graph)
     
         iter = 1
         train_error_trend = []

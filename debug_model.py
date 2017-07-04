@@ -18,24 +18,9 @@ import sys
 
 import ops
 
-def xavier_halfrange(n_in):
-    ''' Returns the variance to use with Xavier initialization for sigmoid/tanh outputs '''
-    return math.sqrt(12.0 * (1.0 / n_in)) / 2.0
-
-def xavier_halfrange_rect(n_in):
-    ''' Returns the variance to use with Xavier initialization for rectified outputs '''
-    return math.sqrt(12.0 * (2.0 / n_in)) / 2.0
-
-def mu_law(x, mu, noise = 0):
+def mu_law(x, mu):
     ml = tf.sign(x) * tf.log(mu * tf.abs(x) + 1.0) / tf.log(mu + 1.0)
-    # Additive noise to prevent overlearning. Overlearning makes it difficult to retrieve patterns,
-    # so it is very problematic.
-    #noise_vec = tf.random_normal(tf.shape(x), 0.0, noise)
-    #noise_vec = tf.Print(noise_vec, [noise_vec, ml], "Noise and mu law: ")
-    #ml = tf.add_n([ml, noise_vec])
-    # Clamping between -1 and 1.
-    #ml = tf.clip_by_value(ml, -1.0, 1.0)
-    # Scaling between 0 and quantization_channels-1 integers.
+    # Scaling between -128 and 128 integers.
     return tf.cast((ml + 1.0) / 2.0 * mu + 0.5, tf.int32)
 
 # value shape is [width, quantization_channels]
@@ -55,7 +40,8 @@ def causal_atrous_conv1d(value, filters, rate, padding):
     # atrous_conv = tf.nn.atrous_conv2d(value_2d, filters_2d, rate, padding)
     # # Squeezing out the width and the batch dimensions.
     # atr_conv_1d = tf.squeeze(atrous_conv, [0, 2])
-    # width = tf.shape(value)[0]
+    width = tf.shape(value)[0]
+    dilation_channels = tf.shape(filters)[2]
     # filter_shape = tf.shape(filters)
     # filter_width = filter_shape[0]
     # filter_width_up = filter_width + (filter_width - 1) * (rate - 1)
@@ -75,140 +61,139 @@ def causal_atrous_conv1d(value, filters, rate, padding):
     atr_conv_1d = tf.squeeze(atr_conv_1d_with_batch, [0])
     # atr_conv_1d shape is [width, dilation_channels]
 
-    return atr_conv_1d
-
-def conv1d(x, w):
-    return tf.squeeze(tf.nn.conv1d(tf.expand_dims(x, 0), w, 1, 'SAME'), [0])
-
-def filter_conv1d(input_channels, output_channels, name=None, input_width=1):
-    return tf.Variable(tf.random_uniform([input_width, input_channels, output_channels],
-             -xavier_halfrange_rect(input_channels), xavier_halfrange_rect(input_channels)), dtype=tf.float32, name=name)
+    #return atr_conv_1d
+    return tf.zeros([width, dilation_channels])
 
 # Returns a tuple of output to the next layer and skip output.
 # The shape of x is [width, dense_channels]
-def gated_unit(x, dilation, parameters, layer_index, noise):
+def gated_unit(x, dilation, parameters, layer_index):
     #tf.histogram_summary('{}_x'.format(layer_index), x)
     
     filter_width = parameters['filter_width']
     dense_channels = parameters['dense_channels']
     dilation_channels = parameters['dilation_channels']
     quantization_channels = parameters['quantization_channels']
-    skip_channels = parameters['skip_channels']
 
-    #noise_vec = tf.random_normal(tf.shape(x), 0.0, noise)
-    #x = x + noise_vec
+    w1 = tf.Variable(tf.random_normal([filter_width, dense_channels, dilation_channels], stddev=0.05),
+            dtype=tf.float32, name='w1')
+    w2 = tf.Variable(tf.random_normal([filter_width, dense_channels, dilation_channels], stddev=0.05),
+            dtype=tf.float32, name='w2')
+    cw = tf.Variable(tf.random_normal([1, dilation_channels, dense_channels], mean=1.0, stddev=0.05),
+            dtype=tf.float32, name='cw')
 
-    w1 = filter_conv1d(dense_channels, dilation_channels, name='w1', input_width=filter_width)
-    w2 = filter_conv1d(dense_channels, dilation_channels, name='w2', input_width=filter_width)
-    cw = filter_conv1d(dilation_channels, dense_channels, name='cw')
-    unit_reg_loss = tf.nn.l2_loss(w1) + tf.nn.l2_loss(w2) + tf.nn.l2_loss(cw)
-
+    #tf.histogram_summary('{}_w1'.format(layer_index), w1)
+    #tf.histogram_summary('{}_w2'.format(layer_index), w2)
+    #tf.histogram_summary('{}_cw'.format(layer_index), cw)
+    
     with tf.name_scope('causal_atrous_convolution'):
         dilated1 = causal_atrous_conv1d(x, w1, dilation, 'SAME')
         dilated2 = causal_atrous_conv1d(x, w2, dilation, 'SAME')
     with tf.name_scope('gated_unit'):
         z = tf.multiply(tf.tanh(dilated1), tf.sigmoid(dilated2))
     # dilated1, dilated2, z shapes are [width, dilation_channels]
-    output = conv1d(z, cw) + x
+    skip = tf.squeeze(tf.nn.conv1d(tf.expand_dims(z, 0), cw, 1, 'SAME'), [0])
+    #tf.histogram_summary('{}_skip'.format(layer_index), skip)
+    output = skip + x
+    #tf.histogram_summary('{}_output'.format(layer_index), output)
     # combined and output shapes are [width, dense_channels]
-    co_skip = filter_conv1d(dilation_channels, skip_channels, name='co_skip')
-    skip = conv1d(z, co_skip)
-    return (output, skip, unit_reg_loss)
+    return (output, skip)
 
 # Returns a tuple of (output, non-softmaxed-logits output)
 # The non-softmaxed output is used for the loss calculation.
 # The shape of x is [width, quantization_channels]
 # The shape of output is [width, quantization_channels]
 # Dilations is an array of [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1, 2, ..., 512]
-def layers(x, parameters, noise):
+def layers(x, parameters):
     dilations = parameters['dilations']
     quantization_channels = parameters['quantization_channels']
     dense_channels = parameters['dense_channels']
-    skip_channels = parameters['skip_channels']
-    preoutput_channels = parameters['preoutput_channels']
-    width = tf.shape(x)[0]
-    co_dense = filter_conv1d(quantization_channels, dense_channels, name='dense_w')
-    reg_loss = tf.nn.l2_loss(co_dense)
+    width = parameters['sample_length']
+
+    co_dense = tf.Variable(tf.random_normal([1, quantization_channels, dense_channels], mean=1.0, stddev=0.05),
+            dtype=tf.float32, name='dense_w')
     
-    next_input = conv1d(x, co_dense)
-    
+    next_input = tf.squeeze(tf.nn.conv1d(tf.expand_dims(x, 0), co_dense, 1, 'SAME'), [0]) # , use_cudnn_on_gpu=False not supported...
     skip_connections = []
     for (i, dilation) in enumerate(dilations):
         with tf.name_scope('layer_{}'.format(i)):
             print "Creating layer {}".format(i)
-            (output, skip, unit_reg_loss) = gated_unit(next_input, dilation, parameters, i, noise)
-            reg_loss = reg_loss + unit_reg_loss
+            #(output, skip) = gated_unit(next_input, dilation, parameters, i)
+            output = tf.zeros([width, dense_channels])
+            skip = tf.zeros([width, dense_channels])
             # output and skip shapes are [width, dense_channels]
             next_input = output
             skip_connections.append(skip)
             sys.stdout.flush()
-    
-    sum_skips = tf.nn.relu(tf.add_n(skip_connections))
-    
-    co1 = filter_conv1d(skip_channels, preoutput_channels, name='co1')
-    reg_loss = reg_loss + tf.nn.l2_loss(co1)
-    
-    relu1 = tf.nn.relu(conv1d(sum_skips, co1))
+    #skips_tensor = tf.nn.relu(tf.pack(skip_connections, 2))
 
-    co2 = filter_conv1d(preoutput_channels, quantization_channels, name='co2')
-    reg_loss = reg_loss + tf.nn.l2_loss(co2)
+    #co1 = tf.Variable(tf.random_normal([1, 1, len(dilations), 1], mean=1.0, stddev=0.05),
+    #        dtype=tf.float32, name='co1')
     
-    raw_output = conv1d(relu1, co2)
+    #weighted_skips = tf.squeeze(tf.nn.conv2d(tf.expand_dims(skips_tensor, 0), co1, [1, 1, 1, 1], padding = 'SAME'), [0, 3])
+    weighted_skips = tf.zeros([width, dense_channels])
+
+    # weighted_skips shape is [width, dense_channels]
+    #relu1 = tf.nn.relu(weighted_skips)
+    
+    #co2 = tf.Variable(tf.random_normal([1, dense_channels, 256], mean=1.0, stddev=0.05),
+    #        dtype=tf.float32, name='co2')
+    
+    #raw_output = tf.squeeze(tf.nn.conv1d(tf.expand_dims(relu1, 0), co2, 1, 'SAME'), [0])
+    raw_output = tf.zeros([width, quantization_channels])
     # raw_output shape is [width, quantization_channels]
-    
-    output = tf.nn.softmax(raw_output)
-    return (output, raw_output, reg_loss)
+    #output = tf.nn.softmax(raw_output)
+    sm_outputs = []
+    for i in range(width):
+        sm_outputs.append(tf.nn.softmax(tf.slice(raw_output, [i, 0], [1, -1])))
+    output = tf.pack(sm_outputs, 0) 
+    #output = tf.zeros([width, quantization_channels])
+    return (output, raw_output)
 
 def create(parameters):
     quantization_channels = parameters['quantization_channels']
-    training_length = parameters['training_length']
-    input = tf.placeholder(tf.float32, name='input')
-    target_output = tf.placeholder(tf.float32, name='target_output')
-    schedule_step = tf.placeholder(tf.float32, name='schedule_step')
-    noise = tf.placeholder(tf.float32, name="noise")
-    input_noise = tf.placeholder(tf.float32, name="input_noise")
-    mu_lawd = mu_law(input, float(quantization_channels - 1), input_noise)
-    mu_law_x = tf.one_hot(mu_lawd, quantization_channels)
+    sample_length = parameters['sample_length']
+    input = tf.placeholder(tf.float32, shape=(sample_length), name='input')
+    y = input
+    x = tf.pad(tf.slice(input, [0], [tf.shape(input)[0] - 1]), [[1, 0]])
+    width = tf.shape(x)[0]
+    # x is shifted right by one and padded by zero.
+    mu_lawd = mu_law(x, float(quantization_channels - 1))
+    shifted_mu_law_x = tf.one_hot(mu_lawd, quantization_channels)
     
-    classes_y = mu_law(target_output, quantization_channels - 1, 0)
-    (output, raw_output, reg_loss) = layers(mu_law_x, parameters, noise)
-    # Normalizing to the sane range. This is only necessary if we sum the
-    # regularization loss with the normal loss.
-    reg_loss = reg_loss / 100000.0
-    
-    cost = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=raw_output, labels=classes_y, name='cost')
-    cost_plus_regularization = cost + reg_loss
+    classes_y = mu_law(y, quantization_channels - 1)
+    (output, raw_output) = layers(shifted_mu_law_x, parameters)
+    #output = tf.zeros([width,quantization_channels])
+    #raw_output = tf.zeros([width,quantization_channels])
+    cost = tf.nn.sparse_softmax_cross_entropy_with_logits(raw_output, classes_y, name='cost')
     
     tvars = tf.trainable_variables()
-    gradients = tf.gradients(cost_plus_regularization, tvars)
-    grads, _ = tf.clip_by_global_norm(gradients, parameters['clip_gradients'])
+    #gradients = tf.gradients(cost, tvars)
+    # grads, _ = tf.clip_by_global_norm(gradients, parameters['clip_gradients'])
     optimizer = tf.train.AdamOptimizer(learning_rate = parameters['learning_rate'])
 
-    train_op = optimizer.apply_gradients(zip(grads, tvars))
+    #train_op = optimizer.apply_gradients(zip(gradients, tvars))
+    train_op = x
+    tf.add_check_numerics_ops()
 
     model = {
         'output': output,
         'optimizer': train_op,
-        'input': input,
-        'target_output': target_output,
-        'cost': cost,
-        'reg_loss': reg_loss,
-        'schedule_step': schedule_step,
-        'input_noise': input_noise,
-        'noise': noise
+        'x': input,
+        'cost': cost
     }
     return model
 
 def create_generative_model(parameters):
     quantization_channels = parameters['quantization_channels']
-    mu_law_input = tf.placeholder(tf.float32, name='mu_law_input')
+    input = tf.placeholder(tf.float32, name='input')
+    mu_law_input = tf.one_hot(mu_law(input, float(quantization_channels - 1)), quantization_channels)
     
-    (full_generated_output, _, _) = layers(mu_law_input, parameters, 0)
+    (full_generated_output, _) = layers(mu_law_input, parameters)
     # Generated output is only the last predicted distribution
     generated_output = tf.squeeze(tf.slice(full_generated_output, [tf.shape(full_generated_output)[0] - 1, 0], [1, -1]), [0])
 
     model = {
         'generated_output': generated_output,
-        'mu_law_input': mu_law_input
+        'x': input
     }
     return model

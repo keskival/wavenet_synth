@@ -187,12 +187,12 @@ def create(parameters):
     train_op = optimizer.apply_gradients(zip(grads, tvars))
 
     model = {
-        'output': output,
+        'output': tf.stop_gradient(output),
         'optimizer': train_op,
         'input': input,
         'target_output': target_output,
-        'cost': cost,
-        'reg_loss': reg_loss,
+        'cost': tf.stop_gradient(cost),
+        'reg_loss': tf.stop_gradient(reg_loss),
         'schedule_step': schedule_step,
         'input_noise': input_noise,
         'noise': noise

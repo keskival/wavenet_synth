@@ -25,6 +25,14 @@ import numpy.fft
 
 import re
 
+def memory():
+    import os
+    import psutil
+    pid = os.getpid()
+    py = psutil.Process(pid)
+    memoryUse = py.memory_info()[0]/2.**30  # memory use in GB...I think
+    print('memory use:', memoryUse)
+
 def make_x_and_y(x, noise, amplitude_plusminus_factor):
     # Length of shifted x and y
     length = np.size(x, 0) - 1
@@ -92,7 +100,7 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
                                               parameters['amplitude_plusminus_factor'])
 
             # Create first estimation and optimize for the first order.
-            [_, cost, reg_loss] = sess.run([model['optimizer'], tf.stop_gradient(model['cost']), tf.stop_gradient(model['reg_loss'])], feed_dict = {
+            [_, cost, reg_loss] = sess.run([model['optimizer'], model['cost'], model['reg_loss']], feed_dict = {
                 model['input']: x,
                 model['schedule_step']: iter,
                 model['noise']: parameters['noise'],
@@ -112,7 +120,7 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
                         ", iters_since_loss_improved: ", iters_since_loss_improved
                 saver.save(sess, 'sound-model')
                 
-                [error, output] = sess.run([tf.stop_gradient(model['cost']), tf.stop_gradient(model['output'])], feed_dict = {
+                [error, output] = sess.run([model['cost'], model['output']], feed_dict = {
                     model['input']: x,
                     model['schedule_step']: iter,
                     model['noise']: parameters['noise'],
@@ -134,7 +142,7 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
                 test_x = manage_data.getNextTrainingBatchSequence(testingData, training_length)
                 (original_test_x, test_x, test_y) = make_x_and_y(test_x, 0.0, 0.0)
 
-                [test_error, test_output] = sess.run([tf.stop_gradient(model['cost']), tf.stop_gradient(model['output'])],
+                [test_error, test_output] = sess.run([model['cost'], model['output']],
                     feed_dict={
                                model['input']: test_x,
                                model['schedule_step']: iter,
@@ -171,6 +179,7 @@ def train(parameters, model, trainingData, testingData, starting_model=None, min
                 ##else:
                 ##    export_to_octave.save('train_error.mat', 'train_error', train_error_trend)
                 ##    export_to_octave.save('test_error.mat', 'test_error', test_error_trend)
+            memory()
             sys.stdout.flush()
             iter += 1
             now = time.time()
